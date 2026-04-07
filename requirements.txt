@@ -3,3 +3,4 @@ uvicorn
 pydantic
 tiktoken
 psycopg[binary]
+httpx

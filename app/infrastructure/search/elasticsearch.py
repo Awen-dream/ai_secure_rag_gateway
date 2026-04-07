@@ -287,7 +287,7 @@ class ElasticsearchSearch:
         payload = self.build_bulk_payload(document, chunks)
         return self._request_json(
             "POST",
-            "/_bulk",
+            "/_bulk?refresh=wait_for",
             raw_body=(payload + "\n").encode("utf-8"),
             headers={"Content-Type": "application/x-ndjson"},
         )

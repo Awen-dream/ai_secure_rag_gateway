@@ -164,6 +164,8 @@ CREATE TABLE IF NOT EXISTS {self.table_name} (
 
 CREATE INDEX IF NOT EXISTS idx_{self.table_name}_tenant_id ON {self.table_name}(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_{self.table_name}_doc_id ON {self.table_name}(doc_id);
+CREATE INDEX IF NOT EXISTS idx_{self.table_name}_embedding_cosine
+ON {self.table_name} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 """.strip()
 
     def build_upsert_sql(self) -> str:
@@ -175,7 +177,7 @@ INSERT INTO {self.table_name} (
     department_scope, role_scope, security_level, metadata_json, embedding
 ) VALUES (
     %(chunk_id)s, %(doc_id)s, %(tenant_id)s, %(title)s, %(section_name)s, %(content)s,
-    %(department_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(metadata_json)s::jsonb, %(embedding)s
+    %(department_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(metadata_json)s::jsonb, %(embedding)s::vector
 )
 ON CONFLICT (chunk_id) DO UPDATE SET
     doc_id = EXCLUDED.doc_id,
@@ -225,7 +227,7 @@ SELECT
     role_scope,
     security_level,
     metadata_json,
-    1 - (embedding <=> %(query_embedding)s) AS similarity_score
+    1 - (embedding <=> %(query_embedding)s::vector) AS similarity_score
 FROM {self.table_name}
 WHERE tenant_id = %(tenant_id)s
   AND chunk_id = ANY(%(chunk_ids)s::text[])

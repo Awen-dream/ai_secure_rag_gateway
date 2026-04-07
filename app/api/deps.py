@@ -9,6 +9,7 @@ from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.services import PolicyEngine
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
@@ -84,6 +85,20 @@ def get_audit_service() -> AuditService:
 
 
 @lru_cache
+def get_openai_client() -> OpenAIClient:
+    """Return the OpenAI Responses API adapter used by the chat service."""
+
+    return OpenAIClient(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        base_url=settings.openai_base_url,
+        timeout_seconds=settings.openai_timeout_seconds,
+        max_output_tokens=settings.openai_max_output_tokens,
+        temperature=settings.openai_temperature,
+    )
+
+
+@lru_cache
 def get_retrieval_service() -> RetrievalService:
     """Return the hybrid retrieval service backed by Elasticsearch and PGVector adapters."""
 
@@ -104,4 +119,5 @@ def get_chat_service() -> ChatService:
         prompt_service=get_prompt_service(),
         policy_engine=get_policy_engine(),
         audit_service=get_audit_service(),
+        openai_client=get_openai_client(),
     )

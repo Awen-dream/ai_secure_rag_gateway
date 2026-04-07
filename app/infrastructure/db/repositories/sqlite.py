@@ -310,7 +310,7 @@ class SQLiteRepository:
                     message.session_id,
                     message.role,
                     message.content,
-                    self._dump_json([citation.dict() for citation in message.citations_json]),
+                    self._dump_json([citation.model_dump() for citation in message.citations_json]),
                     message.token_usage,
                     message.created_at.isoformat(),
                 ),

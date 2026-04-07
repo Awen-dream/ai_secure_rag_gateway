@@ -15,6 +15,7 @@ from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
 from app.domain.risk.services import PolicyEngine
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.llm.openai_client import OpenAIClient
 
 
 def utcnow() -> datetime:
@@ -29,14 +30,18 @@ class ChatService:
         prompt_service: PromptService,
         policy_engine: PolicyEngine,
         audit_service: AuditService,
+        openai_client: OpenAIClient,
     ) -> None:
         self.repository = repository
         self.retrieval_service = retrieval_service
         self.prompt_service = prompt_service
         self.policy_engine = policy_engine
         self.audit_service = audit_service
+        self.openai_client = openai_client
 
     def query(self, payload: ChatQueryRequest, user: UserContext) -> ChatQueryResponse:
+        """Execute one secure RAG query with retrieval, risk control, generation and audit."""
+
         started_at = utcnow()
         session = self._get_or_create_session(payload, user)
         request_id = f"req_{uuid.uuid4().hex[:12]}"
@@ -44,7 +49,14 @@ class ChatService:
         retrieved = self.retrieval_service.retrieve(user, payload.query)
         risk_action, risk_level = self.policy_engine.evaluate(user, payload.query, len(retrieved))
         citations = build_citations(retrieved)
-        answer = self._build_answer(payload.query, template.name, retrieved, citations, risk_action)
+        answer = self._build_answer(
+            query=payload.query,
+            template=template,
+            retrieved=retrieved,
+            citations=citations,
+            risk_action=risk_action,
+            session_summary=session.summary,
+        )
 
         self._append_message(session.id, "user", payload.query)
         self._append_message(session.id, "assistant", answer, citations)
@@ -75,15 +87,21 @@ class ChatService:
         )
 
     def list_sessions(self, user: UserContext) -> list[ChatSession]:
+        """List sessions that belong to the current user inside the current tenant."""
+
         return self.repository.list_sessions(user.tenant_id, user.user_id)
 
     def get_session_detail(self, session_id: str, user: UserContext) -> dict[str, Any]:
+        """Return one session and its persisted messages after tenant and user ownership checks."""
+
         session = self.repository.get_session(session_id)
         if not session or session.tenant_id != user.tenant_id or session.user_id != user.user_id:
             raise KeyError(session_id)
         return {"session": session, "messages": self.repository.list_messages(session_id)}
 
     def _get_or_create_session(self, payload: ChatQueryRequest, user: UserContext) -> ChatSession:
+        """Reuse an existing session when allowed, otherwise create a fresh active session."""
+
         if payload.session_id:
             session = self.repository.get_session(payload.session_id)
             if not session or session.tenant_id != user.tenant_id or session.user_id != user.user_id:
@@ -104,6 +122,8 @@ class ChatService:
         return session
 
     def _append_message(self, session_id: str, role: str, content: str, citations=None) -> None:
+        """Persist one chat message into the current session history."""
+
         self.repository.append_message(
             ChatMessage(
                 id=f"msg_{uuid.uuid4().hex[:12]}",
@@ -116,8 +136,9 @@ class ChatService:
             )
         )
 
-    @staticmethod
-    def _build_answer(query: str, template_name: str, retrieved, citations, risk_action: RiskAction) -> str:
+    def _build_answer(self, query: str, template, retrieved, citations, risk_action: RiskAction, session_summary: str) -> str:
+        """Generate one answer with OpenAI when configured, otherwise fall back to deterministic text."""
+
         if risk_action == RiskAction.REFUSE:
             return (
                 "结论：当前请求触发了安全策略，平台已拒绝回答。\n"
@@ -128,11 +149,31 @@ class ChatService:
                 return "结论：根据当前已授权资料无法确认。\n依据：高敏部门在无证据命中时只返回保守结果。"
             return "结论：根据当前已授权资料无法确认。\n依据：检索范围内没有找到足够证据。"
 
-        evidence_lines = [f"[{item.index}] {result.chunk.text.replace(chr(10), ' ')[:180]}" for item, result in zip(citations, retrieved)]
+        if self.openai_client.can_execute():
+            rendered_prompt = self.prompt_service.render_chat_prompt(
+                template=template,
+                query=query,
+                retrieved=retrieved,
+                citations=citations,
+                session_summary=session_summary,
+            )
+            try:
+                return self.openai_client.generate_response(
+                    instructions=rendered_prompt.instructions,
+                    input_text=rendered_prompt.input_text,
+                )
+            except Exception:
+                pass
+
+        citation_by_doc_id = {item.doc_id: item.index for item in citations}
+        evidence_lines = [
+            f"[{citation_by_doc_id.get(result.document.id, index)}] {result.chunk.text.replace(chr(10), ' ')[:180]}"
+            for index, result in enumerate(retrieved, start=1)
+        ]
         citation_text = ", ".join(f"[{item.index}] {item.title}" for item in citations)
         return (
             "结论：已基于授权知识范围给出回答。\n"
-            f"依据：问题“{query}”命中了 {len(retrieved)} 个权限内知识片段，模板策略为 {template_name}。\n"
+            f"依据：问题“{query}”命中了 {len(retrieved)} 个权限内知识片段，模板策略为 {template.name}。\n"
             + "\n".join(evidence_lines)
             + f"\n引用来源：{citation_text}"
         )

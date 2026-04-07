@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+cleanup() {
+  docker compose -f docker-compose.integration.yml down
+}
+
+trap cleanup EXIT
+
+docker compose -f docker-compose.integration.yml up -d
+
+echo "Waiting for pgvector and elasticsearch to become healthy..."
+for _ in $(seq 1 60); do
+  PG_STATUS="$(docker inspect -f '{{.State.Health.Status}}' secure-rag-pgvector 2>/dev/null || true)"
+  ES_STATUS="$(docker inspect -f '{{.State.Health.Status}}' secure-rag-elasticsearch 2>/dev/null || true)"
+  if [[ "$PG_STATUS" == "healthy" && "$ES_STATUS" == "healthy" ]]; then
+    break
+  fi
+  sleep 2
+done
+
+source .venv/bin/activate
+python -m unittest app.tests.integration.test_pg_es_retrieval_integration

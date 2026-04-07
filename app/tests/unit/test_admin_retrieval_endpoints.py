@@ -12,9 +12,11 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         import os
 
         os.environ["APP_SQLITE_PATH"] = self.db_path
+        os.environ["OPENAI_API_KEY"] = ""
         from app.core.config import settings
 
         settings.sqlite_path = self.db_path
+        settings.openai_api_key = None
 
         from app.api.deps import (
             get_audit_service,
@@ -22,6 +24,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_document_service,
             get_indexing_service,
             get_keyword_backend,
+            get_openai_client,
             get_policy_engine,
             get_prompt_service,
             get_repository,
@@ -38,6 +41,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_prompt_service,
             get_policy_engine,
             get_audit_service,
+            get_openai_client,
             get_retrieval_service,
             get_chat_service,
         ):

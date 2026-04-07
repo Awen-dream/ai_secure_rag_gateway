@@ -6,11 +6,36 @@
 - 权限前置检索
 - 风险策略与拒答
 - 会话、引用与审计闭环
+- OpenAI Responses API 驱动的可回退生成层
 
 ## 运行
 
 ```bash
 uvicorn app.main:app --reload
+```
+
+## PGVector + Elasticsearch 联调
+
+先准备项目虚拟环境依赖，然后运行联调脚本：
+
+```bash
+.venv/bin/pip install -r requirements.txt
+bash scripts/run_pg_es_integration.sh
+```
+
+脚本会：
+
+- 用 `docker-compose.integration.yml` 启动本地 `pgvector` 和 `elasticsearch`
+- 等待两个容器健康
+- 用项目 `.venv` 跑真实集成测试
+
+也可以直接用 `Makefile`：
+
+```bash
+make install
+make test-unit
+make test-integration
+make test-all
 ```
 
 ## Chunking 默认值
@@ -27,6 +52,22 @@ uvicorn app.main:app --reload
 - `CHUNK_TOKENIZER_ENCODING`
 - `CHUNK_MAX_TOKENS`
 - `CHUNK_OVERLAP_TOKENS`
+
+## OpenAI 生成层
+
+当前问答主链路已支持 OpenAI Responses API：
+
+- 配置了 `OPENAI_API_KEY` 时，`/api/v1/chat/query` 会调用真实 OpenAI 生成层
+- 未配置时，会安全回退到本地规则回答，方便本地开发和离线测试
+
+相关环境变量：
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_BASE_URL`
+- `OPENAI_TIMEOUT_SECONDS`
+- `OPENAI_MAX_OUTPUT_TOKENS`
+- `OPENAI_TEMPERATURE`
 
 快速查看某段文本在当前 tokenizer 下的 token 数和 chunk 分布：
 
@@ -90,6 +131,13 @@ scripts/
 - 管理侧可查看后端配置与检索解释
 - PGVector DDL / upsert / search SQL 预览与 schema 初始化入口
 - ES mapping / bulk / search body 预览与索引初始化入口
+
+当前生成层已包含：
+
+- Prompt 模板读取与渲染
+- 授权证据与引用绑定后再调用 LLM
+- OpenAI Responses API 适配器
+- 无 key / 调用失败时的安全回退
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 
