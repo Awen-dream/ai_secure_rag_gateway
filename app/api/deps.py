@@ -24,14 +24,21 @@ def get_repository() -> SQLiteRepository:
 def get_keyword_backend() -> ElasticsearchSearch:
     """Return the keyword retrieval backend adapter."""
 
-    return ElasticsearchSearch(index_name=settings.elasticsearch_index)
+    return ElasticsearchSearch(
+        index_name=settings.elasticsearch_index,
+        mode=settings.elasticsearch_mode,
+    )
 
 
 @lru_cache
 def get_vector_backend() -> PGVectorStore:
     """Return the vector retrieval backend adapter."""
 
-    return PGVectorStore(table_name=settings.pgvector_table)
+    return PGVectorStore(
+        table_name=settings.pgvector_table,
+        embedding_dimension=settings.embedding_dimension,
+        mode=settings.pgvector_mode,
+    )
 
 
 @lru_cache

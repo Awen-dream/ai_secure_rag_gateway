@@ -3,8 +3,12 @@ from app.application.query.rewrite import rewrite_query
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
 from app.domain.retrieval.backends import BackendSearchHit, KeywordSearchBackend, VectorSearchBackend
-from app.domain.retrieval.models import RetrievalProfile
-from app.domain.retrieval.models import RetrievalResult
+from app.domain.retrieval.models import (
+    RetrievalBackendInfo,
+    RetrievalExplainResponse,
+    RetrievalProfile,
+    RetrievalResult,
+)
 from app.domain.retrieval.profiles import get_retrieval_profile
 from app.domain.retrieval.rerankers import sort_by_score
 from app.domain.retrieval.rerankers import weighted_fusion
@@ -27,12 +31,31 @@ class RetrievalService:
     def retrieve(self, user: UserContext, query: str, top_k: int = 5) -> list[RetrievalResult]:
         """Run permission-aware hybrid retrieval and return fused evidence chunks."""
 
+        explanation = self.explain(user, query, top_k)
+        return explanation.results[: min(top_k, explanation.profile.top_k)]
+
+    def explain(self, user: UserContext, query: str, top_k: int = 5) -> RetrievalExplainResponse:
+        """Return an admin-friendly explanation of how hybrid retrieval handled the query."""
+
         rewritten = rewrite_query(query)
         intent = classify_query_intent(rewritten)
         profile = get_retrieval_profile(intent)
         terms = normalize_terms(rewritten)
         results = self._hybrid_retrieve(user, rewritten, terms, profile)
-        return sort_by_score(results)[: min(top_k, profile.top_k)]
+        return RetrievalExplainResponse(
+            rewritten_query=rewritten,
+            intent=intent,
+            profile=profile,
+            results=sort_by_score(results)[: min(top_k, profile.top_k)],
+        )
+
+    def backend_info(self) -> list[RetrievalBackendInfo]:
+        """Return metadata describing the active keyword and vector retrieval backends."""
+
+        return [
+            self.keyword_backend.describe_backend(),
+            self.vector_backend.describe_backend(),
+        ]
 
     def _hybrid_retrieve(
         self,

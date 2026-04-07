@@ -34,6 +34,9 @@ class KeywordSearchBackend(Protocol):
     def upsert_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
         """Sync the latest document snapshot into the keyword index."""
 
+    def describe_backend(self):
+        """Return deployment metadata for this keyword backend."""
+
 
 class VectorSearchBackend(Protocol):
     """Contract for vector-oriented retrieval backends such as PGVector."""
@@ -50,3 +53,6 @@ class VectorSearchBackend(Protocol):
 
     def upsert_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
         """Sync the latest document snapshot into the vector index."""
+
+    def describe_backend(self):
+        """Return deployment metadata for this vector backend."""

@@ -1,0 +1,91 @@
+import unittest
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+class AdminRetrievalEndpointTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.db_path = "/tmp/secure_rag_gateway_admin_retrieval.db"
+        Path(self.db_path).unlink(missing_ok=True)
+
+        import os
+
+        os.environ["APP_SQLITE_PATH"] = self.db_path
+        from app.core.config import settings
+
+        settings.sqlite_path = self.db_path
+
+        from app.api.deps import (
+            get_audit_service,
+            get_chat_service,
+            get_document_service,
+            get_indexing_service,
+            get_keyword_backend,
+            get_policy_engine,
+            get_prompt_service,
+            get_repository,
+            get_retrieval_service,
+            get_vector_backend,
+        )
+
+        for factory in (
+            get_repository,
+            get_keyword_backend,
+            get_vector_backend,
+            get_indexing_service,
+            get_document_service,
+            get_prompt_service,
+            get_policy_engine,
+            get_audit_service,
+            get_retrieval_service,
+            get_chat_service,
+        ):
+            factory.cache_clear()
+
+        from app.main import app
+
+        self.client = TestClient(app)
+        self.headers = {
+            "X-User-Id": "u1",
+            "X-Tenant-Id": "t1",
+            "X-Department-Id": "engineering",
+            "X-Role": "admin",
+            "X-Clearance-Level": "3",
+        }
+
+    def test_admin_can_view_backend_info(self) -> None:
+        response = self.client.get("/api/v1/admin/retrieval/backends", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 2)
+        self.assertEqual(payload[0]["backend"], "elasticsearch")
+        self.assertEqual(payload[1]["backend"], "pgvector")
+
+    def test_admin_can_explain_retrieval(self) -> None:
+        self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "报销制度",
+                "content": "报销制度说明。\n\n审批时限为3个工作日。",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+
+        response = self.client.post(
+            "/api/v1/admin/retrieval/explain",
+            json={"query": "报销审批时限是什么？", "top_k": 3},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "standard_qa")
+        self.assertGreaterEqual(len(payload["results"]), 1)
+        self.assertIn("elasticsearch", payload["results"][0]["retrieval_sources"])
+        self.assertIn("pgvector", payload["results"][0]["retrieval_sources"])
+
+
+if __name__ == "__main__":
+    unittest.main()

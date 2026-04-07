@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_audit_service, get_policy_engine, get_prompt_service
+from app.api.deps import get_audit_service, get_policy_engine, get_prompt_service, get_retrieval_service
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
 from app.domain.prompts.models import PromptTemplate
 from app.domain.prompts.services import PromptService
+from app.domain.retrieval.models import RetrievalBackendInfo, RetrievalExplainRequest, RetrievalExplainResponse
+from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import PolicyDefinition
 from app.domain.risk.services import PolicyEngine
 
@@ -52,3 +54,24 @@ def list_audit_logs(
     service: AuditService = Depends(get_audit_service),
 ) -> list[dict]:
     return [log.dict() for log in service.list_logs()]
+
+
+@router.get("/retrieval/backends", response_model=list[RetrievalBackendInfo])
+def list_retrieval_backends(
+    _: UserContext = Depends(require_admin),
+    service: RetrievalService = Depends(get_retrieval_service),
+) -> list[RetrievalBackendInfo]:
+    """Return the active retrieval backends and their runtime configuration summary."""
+
+    return service.backend_info()
+
+
+@router.post("/retrieval/explain", response_model=RetrievalExplainResponse)
+def explain_retrieval(
+    payload: RetrievalExplainRequest,
+    user: UserContext = Depends(require_admin),
+    service: RetrievalService = Depends(get_retrieval_service),
+) -> RetrievalExplainResponse:
+    """Explain hybrid retrieval behavior for an admin-visible query under current access scope."""
+
+    return service.explain(user, payload.query, payload.top_k)

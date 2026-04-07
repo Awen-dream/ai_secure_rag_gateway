@@ -24,3 +24,28 @@ class RetrievalResult(BaseModel):
     vector_score: float = 0.0
     matched_terms: List[str] = Field(default_factory=list)
     retrieval_sources: List[str] = Field(default_factory=list)
+
+
+class RetrievalBackendInfo(BaseModel):
+    """Describes one retrieval backend and the deployment-relevant metadata around it."""
+
+    backend: str
+    mode: str
+    config: dict = Field(default_factory=dict)
+    capabilities: List[str] = Field(default_factory=list)
+
+
+class RetrievalExplainRequest(BaseModel):
+    """Admin-facing request payload for inspecting hybrid retrieval behavior."""
+
+    query: str
+    top_k: int = 5
+
+
+class RetrievalExplainResponse(BaseModel):
+    """Admin-facing hybrid retrieval explanation payload."""
+
+    rewritten_query: str
+    intent: str
+    profile: RetrievalProfile
+    results: List[RetrievalResult] = Field(default_factory=list)
