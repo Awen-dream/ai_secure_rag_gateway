@@ -64,6 +64,46 @@ class ChunkTextTests(unittest.TestCase):
         self.assertIn("Least Privilege", chunks[1].text)
         self.assertIn("Audit", chunks[2].text)
 
+    def test_chunk_document_preserves_structured_blocks(self) -> None:
+        content = (
+            "# Runbook\n"
+            "- Step one: validate tenant context\n"
+            "- Step two: enforce role scope\n\n"
+            "| Field | Meaning |\n"
+            "| --- | --- |\n"
+            "| tenant_id | Tenant boundary |\n"
+            "| role_scope | Allowed roles |\n\n"
+            "```python\n"
+            "def authorize(user, chunk):\n"
+            "    return user.role in chunk.role_scope\n"
+            "```"
+        )
+
+        chunks = chunk_document(content, max_tokens=120, overlap_tokens=0)
+        combined = "\n\n".join(chunk.text for chunk in chunks)
+
+        self.assertIn("- Step one: validate tenant context", combined)
+        self.assertIn("| Field | Meaning |", combined)
+        self.assertIn("```python", combined)
+        self.assertIn("return user.role in chunk.role_scope", combined)
+
+    def test_chunk_document_splits_long_code_block_with_fences(self) -> None:
+        content = (
+            "# Code\n"
+            "```python\n"
+            "line_one = 'alpha beta gamma delta epsilon zeta eta theta'\n"
+            "line_two = 'iota kappa lambda mu nu xi omicron pi'\n"
+            "line_three = 'rho sigma tau upsilon phi chi psi omega'\n"
+            "```"
+        )
+
+        chunks = chunk_document(content, max_tokens=30, overlap_tokens=0)
+        code_chunks = [chunk for chunk in chunks if "```python" in chunk.text]
+
+        self.assertGreaterEqual(len(code_chunks), 2)
+        self.assertTrue(all("```python" in chunk.text for chunk in code_chunks))
+        self.assertTrue(all("```" in chunk.text for chunk in code_chunks))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -50,4 +50,13 @@ scripts/
 
 ## 说明
 
-当前版本已经切到本地 SQLite 持久化与规则检索，文档、会话、模板、策略、审计会落盘到 `APP_SQLITE_PATH`。后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时可以直接替换基础设施层实现。
+当前版本已经切到本地 SQLite 持久化与可插拔 hybrid retrieval 骨架，文档、会话、模板、策略、审计会落盘到 `APP_SQLITE_PATH`。
+
+当前检索层已包含：
+
+- 关键词召回
+- 轻量向量召回
+- 按意图动态调权
+- 融合打分与弱相关截断
+
+后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。

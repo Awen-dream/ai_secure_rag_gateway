@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass
 
-_CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+from app.application.ingestion.tokenization import estimate_token_count
+
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[。！？!?；;])|(?<=[.?!;])\s+")
 _NATURAL_BREAK_RE = re.compile(r"[，,、。！？!?；;\s]")
 _MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
@@ -12,6 +12,9 @@ _SETEXT_HEADING_RE = re.compile(r"^(=+|-+)\s*$")
 _NUMBERED_HEADING_RE = re.compile(
     r"^(?P<prefix>(?:\d+(?:\.\d+)*[.)]?|[一二三四五六七八九十百千万]+[、.．]|第[一二三四五六七八九十百千万0-9]+[章节部分条]))\s*(?P<title>.+)$"
 )
+_BULLET_LIST_RE = re.compile(r"^[-*+]\s+.+$")
+_ORDERED_LIST_RE = re.compile(r"^\d+[.)]\s+.+$")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$")
 
 
 @dataclass(frozen=True)
@@ -23,19 +26,15 @@ class ChunkPayload:
 
 
 @dataclass(frozen=True)
+class _Block:
+    kind: str
+    text: str
+
+
+@dataclass(frozen=True)
 class _Section:
     heading_path: list[str]
-    paragraphs: list[str]
-
-
-def estimate_token_count(text: str) -> int:
-    cleaned = text.strip()
-    if not cleaned:
-        return 0
-
-    cjk_chars = len(_CJK_CHAR_RE.findall(cleaned))
-    other_chars = len(re.sub(r"[\s\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", "", cleaned))
-    return max(cjk_chars + math.ceil(other_chars / 4), 1)
+    blocks: list[_Block]
 
 
 def _normalize_heading_title(title: str) -> str:
@@ -95,6 +94,22 @@ def _match_setext_heading(current_line: str, next_line: str | None) -> tuple[int
     return level, title
 
 
+def _is_code_fence(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("```") or stripped.startswith("~~~")
+
+
+def _is_list_item(line: str) -> bool:
+    stripped = line.strip()
+    return bool(_BULLET_LIST_RE.match(stripped) or _ORDERED_LIST_RE.match(stripped))
+
+
+def _is_table_start(lines: list[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    return "|" in lines[index] and bool(_TABLE_SEPARATOR_RE.match(lines[index + 1].strip()))
+
+
 def _update_heading_stack(
     stack: list[tuple[int, str]],
     level: int,
@@ -107,29 +122,75 @@ def _update_heading_stack(
     return updated
 
 
-def _append_paragraph(paragraphs: list[str], paragraph_lines: list[str]) -> None:
+def _append_paragraph(blocks: list[_Block], paragraph_lines: list[str]) -> None:
     paragraph = "\n".join(line.rstrip() for line in paragraph_lines).strip()
     if paragraph:
-        paragraphs.append(paragraph)
+        blocks.append(_Block(kind="paragraph", text=paragraph))
     paragraph_lines.clear()
+
+
+def _append_block(blocks: list[_Block], kind: str, lines: list[str]) -> None:
+    text = "\n".join(line.rstrip() for line in lines).strip()
+    if text:
+        blocks.append(_Block(kind=kind, text=text))
 
 
 def _append_section(
     sections: list[_Section],
     heading_stack: list[tuple[int, str]],
-    paragraphs: list[str],
+    blocks: list[_Block],
 ) -> None:
-    if not paragraphs:
+    if not blocks:
         return
-    sections.append(_Section(heading_path=[title for _, title in heading_stack], paragraphs=list(paragraphs)))
-    paragraphs.clear()
+    sections.append(_Section(heading_path=[title for _, title in heading_stack], blocks=list(blocks)))
+    blocks.clear()
+
+
+def _collect_code_block(lines: list[str], start: int) -> tuple[list[str], int]:
+    block_lines = [lines[start]]
+    index = start + 1
+    while index < len(lines):
+        block_lines.append(lines[index])
+        if _is_code_fence(lines[index]):
+            return block_lines, index + 1
+        index += 1
+    return block_lines, index
+
+
+def _collect_table_block(lines: list[str], start: int) -> tuple[list[str], int]:
+    block_lines = [lines[start], lines[start + 1]]
+    index = start + 2
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped or "|" not in lines[index]:
+            break
+        block_lines.append(lines[index])
+        index += 1
+    return block_lines, index
+
+
+def _collect_list_block(lines: list[str], start: int) -> tuple[list[str], int]:
+    block_lines = [lines[start]]
+    index = start + 1
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped:
+            break
+        if _is_code_fence(lines[index]) or _is_table_start(lines, index) or _match_heading_line(lines[index]):
+            break
+        if _is_list_item(lines[index]) or lines[index].startswith(("  ", "\t")):
+            block_lines.append(lines[index])
+            index += 1
+            continue
+        break
+    return block_lines, index
 
 
 def _split_sections(content: str) -> list[_Section]:
     lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     sections: list[_Section] = []
     heading_stack: list[tuple[int, str]] = []
-    paragraphs: list[str] = []
+    blocks: list[_Block] = []
     paragraph_lines: list[str] = []
 
     index = 0
@@ -140,30 +201,48 @@ def _split_sections(content: str) -> list[_Section]:
 
         setext_heading = _match_setext_heading(line, next_line)
         if setext_heading:
-            _append_paragraph(paragraphs, paragraph_lines)
-            _append_section(sections, heading_stack, paragraphs)
+            _append_paragraph(blocks, paragraph_lines)
+            _append_section(sections, heading_stack, blocks)
             heading_stack = _update_heading_stack(heading_stack, setext_heading[0], setext_heading[1])
             index += 2
             continue
 
         heading = _match_heading_line(line)
         if heading:
-            _append_paragraph(paragraphs, paragraph_lines)
-            _append_section(sections, heading_stack, paragraphs)
+            _append_paragraph(blocks, paragraph_lines)
+            _append_section(sections, heading_stack, blocks)
             heading_stack = _update_heading_stack(heading_stack, heading[0], heading[1])
             index += 1
             continue
 
         if not stripped:
-            _append_paragraph(paragraphs, paragraph_lines)
+            _append_paragraph(blocks, paragraph_lines)
             index += 1
+            continue
+
+        if _is_code_fence(line):
+            _append_paragraph(blocks, paragraph_lines)
+            code_block, index = _collect_code_block(lines, index)
+            _append_block(blocks, "code", code_block)
+            continue
+
+        if _is_table_start(lines, index):
+            _append_paragraph(blocks, paragraph_lines)
+            table_block, index = _collect_table_block(lines, index)
+            _append_block(blocks, "table", table_block)
+            continue
+
+        if _is_list_item(line):
+            _append_paragraph(blocks, paragraph_lines)
+            list_block, index = _collect_list_block(lines, index)
+            _append_block(blocks, "list", list_block)
             continue
 
         paragraph_lines.append(line.strip())
         index += 1
 
-    _append_paragraph(paragraphs, paragraph_lines)
-    _append_section(sections, heading_stack, paragraphs)
+    _append_paragraph(blocks, paragraph_lines)
+    _append_section(sections, heading_stack, blocks)
     return sections
 
 
@@ -239,6 +318,74 @@ def _paragraph_units(paragraph: str, max_tokens: int) -> list[str]:
     return units or _split_long_text(paragraph, max_tokens)
 
 
+def _chunk_lines(lines: list[str], max_tokens: int) -> list[str]:
+    units: list[str] = []
+    buffer: list[str] = []
+    buffer_tokens = 0
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        line_tokens = estimate_token_count(line)
+        if line_tokens > max_tokens:
+            if buffer:
+                units.append("\n".join(buffer).strip())
+                buffer = []
+                buffer_tokens = 0
+            units.extend(_split_long_text(line, max_tokens))
+            continue
+
+        if buffer and buffer_tokens + line_tokens > max_tokens:
+            units.append("\n".join(buffer).strip())
+            buffer = [line]
+            buffer_tokens = line_tokens
+            continue
+
+        buffer.append(line)
+        buffer_tokens += line_tokens
+
+    if buffer:
+        units.append("\n".join(buffer).strip())
+
+    return [unit for unit in units if unit]
+
+
+def _code_units(block_text: str, max_tokens: int) -> list[str]:
+    if estimate_token_count(block_text) <= max_tokens:
+        return [block_text]
+
+    lines = block_text.splitlines()
+    if len(lines) < 2 or not _is_code_fence(lines[0]):
+        return _chunk_lines(lines, max_tokens)
+
+    opening_fence = lines[0].rstrip()
+    closing_fence = lines[-1].rstrip() if _is_code_fence(lines[-1]) else ""
+    body_lines = lines[1:-1] if closing_fence else lines[1:]
+
+    wrapper_tokens = estimate_token_count(opening_fence)
+    if closing_fence:
+        wrapper_tokens += estimate_token_count(closing_fence)
+    body_budget = max(max_tokens - wrapper_tokens, 1)
+
+    body_chunks = _chunk_lines(body_lines, body_budget)
+    rendered: list[str] = []
+    for chunk in body_chunks:
+        parts = [opening_fence, chunk]
+        if closing_fence:
+            parts.append(closing_fence)
+        rendered.append("\n".join(parts).strip())
+    return rendered or [block_text]
+
+
+def _block_units(block: _Block, max_tokens: int) -> list[str]:
+    if block.kind == "paragraph":
+        return _paragraph_units(block.text, max_tokens)
+    if estimate_token_count(block.text) <= max_tokens:
+        return [block.text]
+    if block.kind == "code":
+        return _code_units(block.text, max_tokens)
+    return _chunk_lines(block.text.splitlines(), max_tokens)
+
+
 def _tail_overlap_units(units: list[str], overlap_tokens: int) -> list[str]:
     if overlap_tokens <= 0:
         return []
@@ -269,7 +416,7 @@ def _select_heading_prefix(heading_path: list[str], max_tokens: int) -> str:
 
 
 def _chunk_section(section: _Section, max_tokens: int, overlap_tokens: int) -> list[ChunkPayload]:
-    if not section.paragraphs:
+    if not section.blocks:
         return []
 
     section_name = section.heading_path[-1] if section.heading_path else "Document"
@@ -285,8 +432,8 @@ def _chunk_section(section: _Section, max_tokens: int, overlap_tokens: int) -> l
     body_budget = max(body_budget, 1)
 
     units: list[str] = []
-    for paragraph in section.paragraphs:
-        units.extend(_paragraph_units(paragraph, body_budget))
+    for block in section.blocks:
+        units.extend(_block_units(block, body_budget))
 
     def render(body: str) -> str:
         return f"{heading_prefix}\n\n{body}".strip() if heading_prefix else body
