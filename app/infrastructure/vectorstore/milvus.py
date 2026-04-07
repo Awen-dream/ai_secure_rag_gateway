@@ -1,0 +1,2 @@
+class MilvusVectorStore:
+    backend = "milvus"

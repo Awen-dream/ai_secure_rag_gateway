@@ -1,0 +1,2 @@
+class DeepSeekClient:
+    provider = "deepseek"

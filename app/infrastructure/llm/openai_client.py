@@ -1,0 +1,2 @@
+class OpenAIClient:
+    provider = "openai"

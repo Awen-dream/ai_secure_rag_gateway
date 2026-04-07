@@ -1,0 +1,2 @@
+class ElasticsearchSearch:
+    backend = "elasticsearch"

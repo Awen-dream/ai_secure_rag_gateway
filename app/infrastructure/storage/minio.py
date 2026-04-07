@@ -1,0 +1,2 @@
+class MinioStorage:
+    backend = "minio"

@@ -1,0 +1,2 @@
+class PGVectorStore:
+    backend = "pgvector"

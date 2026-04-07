@@ -1,0 +1,2 @@
+class QwenClient:
+    provider = "qwen"
