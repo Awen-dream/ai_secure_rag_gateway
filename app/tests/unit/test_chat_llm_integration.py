@@ -11,12 +11,14 @@ class ChatLLMIntegrationTest(unittest.TestCase):
         self.db_path = "/tmp/secure_rag_gateway_chat_llm.db"
         Path(self.db_path).unlink(missing_ok=True)
 
+        os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["OPENAI_API_KEY"] = "test-key"
         os.environ["OPENAI_MODEL"] = "gpt-5.4-mini"
 
         from app.core.config import settings
 
+        settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
         settings.openai_api_key = "test-key"
         settings.openai_model = "gpt-5.4-mini"

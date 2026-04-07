@@ -121,6 +121,11 @@ scripts/
 
 当前版本已经切到本地 SQLite 持久化与可插拔 hybrid retrieval 骨架，文档、会话、模板、策略、审计会落盘到 `APP_SQLITE_PATH`。
 
+元数据主库现在支持两种模式：
+
+- `APP_REPOSITORY_BACKEND=sqlite`：本地开发默认模式
+- `APP_REPOSITORY_BACKEND=postgres`：企业部署主库模式，需要配置 `APP_POSTGRES_DSN`
+
 当前检索层已包含：
 
 - 关键词召回
@@ -138,6 +143,13 @@ scripts/
 - 授权证据与引用绑定后再调用 LLM
 - OpenAI Responses API 适配器
 - 无 key / 调用失败时的安全回退
+
+当前元数据层已包含：
+
+- SQLite 仓储
+- PostgreSQL 仓储
+- 统一仓储契约，服务层无感切换
+- PostgreSQL 初始化 SQL，见 `migrations/0001_postgres_metadata.sql`
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 

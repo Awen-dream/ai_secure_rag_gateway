@@ -8,6 +8,8 @@ from app.domain.prompts.services import PromptService
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.services import PolicyEngine
+from app.infrastructure.db.repositories.base import MetadataRepository
+from app.infrastructure.db.repositories.postgres import PostgresRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
@@ -15,9 +17,16 @@ from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
 
 @lru_cache
-def get_repository() -> SQLiteRepository:
-    """Return the shared metadata repository used by services in the current process."""
+def get_repository() -> MetadataRepository:
+    """Return the configured metadata repository used by services in the current process."""
 
+    if settings.repository_backend == "postgres":
+        if not settings.postgres_dsn:
+            raise ValueError("APP_POSTGRES_DSN is required when APP_REPOSITORY_BACKEND=postgres")
+        return PostgresRepository(
+            dsn=settings.postgres_dsn,
+            auto_init_schema=settings.postgres_auto_init_schema,
+        )
     return SQLiteRepository(settings.sqlite_path)
 
 

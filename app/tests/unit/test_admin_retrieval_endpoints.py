@@ -11,10 +11,12 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
 
         import os
 
+        os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["OPENAI_API_KEY"] = ""
         from app.core.config import settings
 
+        settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
         settings.openai_api_key = None
 

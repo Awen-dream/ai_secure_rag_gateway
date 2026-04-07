@@ -1,11 +1,11 @@
 from app.domain.auth.models import UserContext
 from app.domain.risk.models import PolicyDefinition, RiskAction
 from app.domain.risk.rules import baseline_policy
-from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.db.repositories.base import MetadataRepository
 
 
 class PolicyEngine:
-    def __init__(self, repository: SQLiteRepository) -> None:
+    def __init__(self, repository: MetadataRepository) -> None:
         self.repository = repository
         if not self.repository.list_policies():
             self.repository.save_policy(baseline_policy())

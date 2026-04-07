@@ -5,7 +5,7 @@ from app.domain.audit.models import AuditLog, RetrievalMetrics
 from app.domain.auth.models import UserContext
 from app.domain.retrieval.models import RetrievalResult
 from app.domain.risk.models import RiskAction
-from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.db.repositories.base import MetadataRepository
 
 
 def utcnow() -> datetime:
@@ -13,7 +13,7 @@ def utcnow() -> datetime:
 
 
 class AuditService:
-    def __init__(self, repository: SQLiteRepository) -> None:
+    def __init__(self, repository: MetadataRepository) -> None:
         self.repository = repository
 
     def write_log(

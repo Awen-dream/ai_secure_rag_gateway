@@ -14,7 +14,7 @@ from app.domain.prompts.services import PromptService
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
 from app.domain.risk.services import PolicyEngine
-from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.llm.openai_client import OpenAIClient
 
 
@@ -25,7 +25,7 @@ def utcnow() -> datetime:
 class ChatService:
     def __init__(
         self,
-        repository: SQLiteRepository,
+        repository: MetadataRepository,
         retrieval_service: RetrievalService,
         prompt_service: PromptService,
         policy_engine: PolicyEngine,

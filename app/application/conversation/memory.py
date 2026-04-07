@@ -1,5 +1,5 @@
-from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.db.repositories.base import MetadataRepository
 
 
-def get_session_messages(repository: SQLiteRepository, session_id: str):
+def get_session_messages(repository: MetadataRepository, session_id: str):
     return repository.list_messages(session_id)

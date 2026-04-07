@@ -8,7 +8,10 @@ class AppSettings(BaseModel):
     app_name: str = os.getenv("APP_NAME", "Secure Enterprise RAG Gateway")
     app_version: str = os.getenv("APP_VERSION", "0.2.0")
     api_prefix: str = os.getenv("API_PREFIX", "/api/v1")
+    repository_backend: str = os.getenv("APP_REPOSITORY_BACKEND", "sqlite")
     sqlite_path: str = os.getenv("APP_SQLITE_PATH", ".data/secure_rag_gateway.db")
+    postgres_dsn: Optional[str] = os.getenv("APP_POSTGRES_DSN")
+    postgres_auto_init_schema: bool = os.getenv("APP_POSTGRES_AUTO_INIT_SCHEMA", "true").lower() == "true"
     elasticsearch_index: str = os.getenv("APP_ELASTICSEARCH_INDEX", "knowledge_chunks")
     elasticsearch_mode: str = os.getenv("APP_ELASTICSEARCH_MODE", "local-fallback")
     elasticsearch_endpoint: Optional[str] = os.getenv("APP_ELASTICSEARCH_ENDPOINT")

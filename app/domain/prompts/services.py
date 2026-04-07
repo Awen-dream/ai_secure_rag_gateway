@@ -1,11 +1,11 @@
 from app.domain.citations.services import Citation
 from app.domain.prompts.models import PromptTemplate, RenderedPrompt
 from app.domain.retrieval.models import RetrievalResult
-from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.db.repositories.base import MetadataRepository
 
 
 class PromptService:
-    def __init__(self, repository: SQLiteRepository) -> None:
+    def __init__(self, repository: MetadataRepository) -> None:
         self.repository = repository
         self._bootstrap_defaults()
 

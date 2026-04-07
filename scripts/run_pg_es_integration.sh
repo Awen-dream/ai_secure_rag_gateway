@@ -23,4 +23,6 @@ for _ in $(seq 1 60); do
 done
 
 source .venv/bin/activate
-python -m unittest app.tests.integration.test_pg_es_retrieval_integration
+python -m unittest \
+  app.tests.integration.test_pg_es_retrieval_integration \
+  app.tests.integration.test_postgres_metadata_repository_integration

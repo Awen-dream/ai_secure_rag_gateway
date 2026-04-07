@@ -11,7 +11,7 @@ from app.domain.auth.policies import can_access_department
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.documents.schemas import DocumentUploadRequest
 from app.domain.retrieval.indexing import RetrievalIndexingService
-from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.db.repositories.base import MetadataRepository
 
 
 def utcnow() -> datetime:
@@ -23,7 +23,7 @@ class DocumentService:
 
     def __init__(
         self,
-        repository: SQLiteRepository,
+        repository: MetadataRepository,
         indexing_service: Optional[RetrievalIndexingService] = None,
     ) -> None:
         self.repository = repository

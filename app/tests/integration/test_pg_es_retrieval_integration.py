@@ -11,6 +11,7 @@ class PgEsRetrievalIntegrationTest(unittest.TestCase):
         cls.db_path = "/tmp/secure_rag_gateway_pg_es_integration.db"
         Path(cls.db_path).unlink(missing_ok=True)
 
+        os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = cls.db_path
         os.environ["APP_ELASTICSEARCH_MODE"] = "remote"
         os.environ["APP_ELASTICSEARCH_ENDPOINT"] = "http://127.0.0.1:9200"
@@ -23,6 +24,7 @@ class PgEsRetrievalIntegrationTest(unittest.TestCase):
 
         from app.core.config import settings
 
+        settings.repository_backend = "sqlite"
         settings.sqlite_path = cls.db_path
         settings.elasticsearch_mode = "remote"
         settings.elasticsearch_endpoint = "http://127.0.0.1:9200"
