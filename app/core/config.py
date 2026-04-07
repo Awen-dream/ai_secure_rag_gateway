@@ -11,8 +11,11 @@ class AppSettings(BaseModel):
     sqlite_path: str = os.getenv("APP_SQLITE_PATH", ".data/secure_rag_gateway.db")
     elasticsearch_index: str = os.getenv("APP_ELASTICSEARCH_INDEX", "knowledge_chunks")
     elasticsearch_mode: str = os.getenv("APP_ELASTICSEARCH_MODE", "local-fallback")
+    elasticsearch_endpoint: Optional[str] = os.getenv("APP_ELASTICSEARCH_ENDPOINT")
     pgvector_table: str = os.getenv("APP_PGVECTOR_TABLE", "document_embeddings")
     pgvector_mode: str = os.getenv("APP_PGVECTOR_MODE", "local-fallback")
+    pgvector_dsn: Optional[str] = os.getenv("APP_PGVECTOR_DSN")
+    pgvector_auto_init_schema: bool = os.getenv("APP_PGVECTOR_AUTO_INIT_SCHEMA", "false").lower() == "true"
     embedding_dimension: int = int(os.getenv("APP_EMBEDDING_DIMENSION", "1536"))
     chunk_tokenizer_model: str = os.getenv("CHUNK_TOKENIZER_MODEL", os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"))
     chunk_tokenizer_encoding: Optional[str] = os.getenv("CHUNK_TOKENIZER_ENCODING")

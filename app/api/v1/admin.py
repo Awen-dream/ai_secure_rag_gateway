@@ -1,15 +1,29 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import get_audit_service, get_policy_engine, get_prompt_service, get_retrieval_service
+from app.api.deps import (
+    get_audit_service,
+    get_keyword_backend,
+    get_policy_engine,
+    get_prompt_service,
+    get_retrieval_service,
+    get_vector_backend,
+)
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
 from app.domain.prompts.models import PromptTemplate
 from app.domain.prompts.services import PromptService
-from app.domain.retrieval.models import RetrievalBackendInfo, RetrievalExplainRequest, RetrievalExplainResponse
+from app.domain.retrieval.models import (
+    RetrievalBackendInfo,
+    RetrievalBackendPlan,
+    RetrievalExplainRequest,
+    RetrievalExplainResponse,
+)
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import PolicyDefinition
 from app.domain.risk.services import PolicyEngine
+from app.infrastructure.search.elasticsearch import ElasticsearchSearch
+from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
 router = APIRouter()
 
@@ -75,3 +89,54 @@ def explain_retrieval(
     """Explain hybrid retrieval behavior for an admin-visible query under current access scope."""
 
     return service.explain(user, payload.query, payload.top_k)
+
+
+@router.get("/retrieval/backends/{backend}/plan", response_model=RetrievalBackendPlan)
+def get_retrieval_backend_plan(
+    backend: str,
+    query: str = Query("企业知识访问网关"),
+    top_k: int = Query(5, ge=1, le=20),
+    user: UserContext = Depends(require_admin),
+    keyword_backend: ElasticsearchSearch = Depends(get_keyword_backend),
+    vector_backend: PGVectorStore = Depends(get_vector_backend),
+) -> RetrievalBackendPlan:
+    """Return backend-specific integration artifacts for debugging and deployment review."""
+
+    if backend == "elasticsearch":
+        terms = query.split()
+        return RetrievalBackendPlan(
+            backend="elasticsearch",
+            execute_enabled=keyword_backend.can_execute(),
+            artifacts={
+                "mapping": keyword_backend.build_index_mapping(),
+                "search_body": keyword_backend.build_search_body(
+                    query=query,
+                    tenant_id=user.tenant_id,
+                    terms=terms,
+                    top_k=top_k,
+                ),
+            },
+        )
+
+    if backend == "pgvector":
+        return RetrievalBackendPlan(
+            backend="pgvector",
+            execute_enabled=vector_backend.can_execute(),
+            artifacts={
+                "ddl": vector_backend.build_table_ddl(),
+                "upsert_sql": vector_backend.build_upsert_sql(),
+                "search_sql": vector_backend.build_search_sql(user.tenant_id, top_k),
+            },
+        )
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported retrieval backend.")
+
+
+@router.post("/retrieval/backends/pgvector/init-schema")
+def init_pgvector_schema(
+    _: UserContext = Depends(require_admin),
+    vector_backend: PGVectorStore = Depends(get_vector_backend),
+) -> dict:
+    """Initialize pgvector schema when PostgreSQL execution mode is configured."""
+
+    return vector_backend.initialize_schema()

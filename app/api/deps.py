@@ -27,6 +27,7 @@ def get_keyword_backend() -> ElasticsearchSearch:
     return ElasticsearchSearch(
         index_name=settings.elasticsearch_index,
         mode=settings.elasticsearch_mode,
+        endpoint=settings.elasticsearch_endpoint,
     )
 
 
@@ -38,6 +39,8 @@ def get_vector_backend() -> PGVectorStore:
         table_name=settings.pgvector_table,
         embedding_dimension=settings.embedding_dimension,
         mode=settings.pgvector_mode,
+        dsn=settings.pgvector_dsn,
+        auto_init_schema=settings.pgvector_auto_init_schema,
     )
 
 

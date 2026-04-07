@@ -62,6 +62,37 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload[0]["backend"], "elasticsearch")
         self.assertEqual(payload[1]["backend"], "pgvector")
 
+    def test_admin_can_view_backend_plan(self) -> None:
+        es_response = self.client.get(
+            "/api/v1/admin/retrieval/backends/elasticsearch/plan",
+            params={"query": "报销审批时限是什么", "top_k": 3},
+            headers=self.headers,
+        )
+        self.assertEqual(es_response.status_code, 200)
+        es_payload = es_response.json()
+        self.assertEqual(es_payload["backend"], "elasticsearch")
+        self.assertIn("mapping", es_payload["artifacts"])
+        self.assertIn("search_body", es_payload["artifacts"])
+
+        pg_response = self.client.get(
+            "/api/v1/admin/retrieval/backends/pgvector/plan",
+            params={"query": "报销审批时限是什么", "top_k": 3},
+            headers=self.headers,
+        )
+        self.assertEqual(pg_response.status_code, 200)
+        pg_payload = pg_response.json()
+        self.assertEqual(pg_payload["backend"], "pgvector")
+        self.assertIn("ddl", pg_payload["artifacts"])
+        self.assertIn("upsert_sql", pg_payload["artifacts"])
+        self.assertIn("search_sql", pg_payload["artifacts"])
+
+    def test_pgvector_init_schema_is_safe_in_fallback_mode(self) -> None:
+        response = self.client.post("/api/v1/admin/retrieval/backends/pgvector/init-schema", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["backend"], "pgvector")
+        self.assertFalse(payload["executed"])
+
     def test_admin_can_explain_retrieval(self) -> None:
         self.client.post(
             "/api/v1/docs/upload",

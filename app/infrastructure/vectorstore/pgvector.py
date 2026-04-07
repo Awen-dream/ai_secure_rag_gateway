@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+import math
+from hashlib import sha256
 from typing import Sequence
 
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.retrieval.backends import BackendSearchHit
 from app.domain.retrieval.models import RetrievalBackendInfo
-from app.domain.retrieval.retrievers import vector_score
+from app.domain.retrieval.retrievers import semantic_features, vector_score
+
+try:
+    import psycopg
+except ImportError:  # pragma: no cover - optional runtime dependency
+    psycopg = None
 
 
 class PGVectorStore:
@@ -19,10 +26,19 @@ class PGVectorStore:
 
     backend_name = "pgvector"
 
-    def __init__(self, table_name: str = "document_embeddings", embedding_dimension: int = 1536, mode: str = "local-fallback") -> None:
+    def __init__(
+        self,
+        table_name: str = "document_embeddings",
+        embedding_dimension: int = 1536,
+        mode: str = "local-fallback",
+        dsn: str | None = None,
+        auto_init_schema: bool = False,
+    ) -> None:
         self.table_name = table_name
         self.embedding_dimension = embedding_dimension
         self.mode = mode
+        self.dsn = dsn
+        self.auto_init_schema = auto_init_schema
 
     def search(
         self,
@@ -48,7 +64,15 @@ class PGVectorStore:
         return sorted(hits, key=lambda item: item.score, reverse=True)[:top_k]
 
     def upsert_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
-        """Describe the vector index sync operation for the given document."""
+        """Sync or preview vector index updates for the given document."""
+
+        rows = self.build_upsert_rows(document, chunks)
+        executed = False
+        if self.can_execute() and rows:
+            if self.auto_init_schema:
+                self.initialize_schema()
+            self._execute_upsert(rows)
+            executed = True
 
         return {
             "backend": self.backend_name,
@@ -56,6 +80,7 @@ class PGVectorStore:
             "doc_id": document.id,
             "chunks_indexed": len(chunks),
             "upsert_sql_preview": self.build_upsert_sql(),
+            "executed": executed,
         }
 
     def describe_backend(self) -> RetrievalBackendInfo:
@@ -67,9 +92,28 @@ class PGVectorStore:
             config={
                 "table_name": self.table_name,
                 "embedding_dimension": self.embedding_dimension,
+                "dsn": self.dsn,
+                "auto_init_schema": self.auto_init_schema,
             },
-            capabilities=["vector_search", "cosine_distance", "metadata_filtering", "upsert_preview"],
+            capabilities=["vector_search", "cosine_distance", "metadata_filtering", "upsert_preview", "ddl_preview"],
         )
+
+    def can_execute(self) -> bool:
+        """Return whether this adapter can talk to a real PostgreSQL + pgvector backend."""
+
+        return self.mode == "postgres" and bool(self.dsn) and psycopg is not None
+
+    def initialize_schema(self) -> dict:
+        """Create pgvector extension and table when real execution mode is enabled."""
+
+        ddl = self.build_table_ddl()
+        executed = False
+        if self.can_execute():
+            with psycopg.connect(self.dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(ddl)
+            executed = True
+        return {"backend": self.backend_name, "executed": executed, "ddl": ddl}
 
     def build_table_ddl(self) -> str:
         """Return the SQL DDL required for a production pgvector table."""
@@ -120,7 +164,7 @@ ON CONFLICT (chunk_id) DO UPDATE SET
 """.strip()
 
     def build_upsert_rows(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> list[dict]:
-        """Build parameter rows for a future real pgvector upsert implementation."""
+        """Build parameter rows for pgvector upserts using deterministic local embeddings."""
 
         return [
             {
@@ -134,7 +178,7 @@ ON CONFLICT (chunk_id) DO UPDATE SET
                 "role_scope": json.dumps(chunk.role_scope, ensure_ascii=False),
                 "security_level": chunk.security_level,
                 "metadata_json": json.dumps(chunk.metadata_json, ensure_ascii=False),
-                "embedding": f"<{self.embedding_dimension}-dim-vector>",
+                "embedding": self._to_pgvector_literal(self._embed_text(chunk.text)),
             }
             for chunk in chunks
         ]
@@ -160,3 +204,35 @@ WHERE tenant_id = %(tenant_id)s
 ORDER BY embedding <=> %(query_embedding)s
 LIMIT {top_k};
 """.strip()
+
+    def _execute_upsert(self, rows: Sequence[dict]) -> None:
+        """Execute pgvector upserts against a real PostgreSQL backend when configured."""
+
+        if not self.can_execute() or not rows:
+            return
+        sql = self.build_upsert_sql()
+        with psycopg.connect(self.dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.executemany(sql, rows)
+
+    def _embed_text(self, text: str) -> list[float]:
+        """Generate a deterministic local embedding so pgvector integration can be tested offline."""
+
+        vector = [0.0] * self.embedding_dimension
+        features = semantic_features(text)
+        for token, weight in features.items():
+            digest = sha256(token.encode("utf-8")).digest()
+            slot = int.from_bytes(digest[:4], "big") % self.embedding_dimension
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            vector[slot] += sign * float(weight)
+
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm == 0:
+            return vector
+        return [round(value / norm, 8) for value in vector]
+
+    @staticmethod
+    def _to_pgvector_literal(values: Sequence[float]) -> str:
+        """Render a Python float vector into pgvector text literal syntax."""
+
+        return "[" + ",".join(f"{value:.8f}" for value in values) + "]"

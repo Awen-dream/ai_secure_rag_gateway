@@ -49,3 +49,11 @@ class RetrievalExplainResponse(BaseModel):
     intent: str
     profile: RetrievalProfile
     results: List[RetrievalResult] = Field(default_factory=list)
+
+
+class RetrievalBackendPlan(BaseModel):
+    """Admin-facing backend plan payload used for integration preview and debugging."""
+
+    backend: str
+    execute_enabled: bool
+    artifacts: dict = Field(default_factory=dict)

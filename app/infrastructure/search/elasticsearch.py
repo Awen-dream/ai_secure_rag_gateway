@@ -20,9 +20,15 @@ class ElasticsearchSearch:
 
     backend_name = "elasticsearch"
 
-    def __init__(self, index_name: str = "knowledge_chunks", mode: str = "local-fallback") -> None:
+    def __init__(
+        self,
+        index_name: str = "knowledge_chunks",
+        mode: str = "local-fallback",
+        endpoint: str | None = None,
+    ) -> None:
         self.index_name = index_name
         self.mode = mode
+        self.endpoint = endpoint
 
     def search(
         self,
@@ -66,9 +72,20 @@ class ElasticsearchSearch:
         return RetrievalBackendInfo(
             backend=self.backend_name,
             mode=self.mode,
-            config={"index_name": self.index_name},
-            capabilities=["keyword_search", "bm25_style_matching", "metadata_filtering", "bulk_index_preview"],
+            config={"index_name": self.index_name, "endpoint": self.endpoint},
+            capabilities=[
+                "keyword_search",
+                "bm25_style_matching",
+                "metadata_filtering",
+                "bulk_index_preview",
+                "mapping_preview",
+            ],
         )
+
+    def can_execute(self) -> bool:
+        """Return whether this adapter is configured to talk to a real Elasticsearch cluster."""
+
+        return self.mode == "remote" and bool(self.endpoint)
 
     def build_index_mapping(self) -> dict:
         """Return the target Elasticsearch mapping we expect for chunk indexing."""
