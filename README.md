@@ -13,6 +13,28 @@
 uvicorn app.main:app --reload
 ```
 
+## Chunking 默认值
+
+当前文档切分会优先按标题、列表、表格、代码块等结构切分，再在 section 内按真实 tokenizer token budget 聚合。
+
+- 默认 tokenizer: `text-embedding-3-small`
+- 默认 chunk 大小: `400` tokens
+- 默认 overlap: `60` tokens
+
+可以通过这些环境变量覆盖：
+
+- `CHUNK_TOKENIZER_MODEL`
+- `CHUNK_TOKENIZER_ENCODING`
+- `CHUNK_MAX_TOKENS`
+- `CHUNK_OVERLAP_TOKENS`
+
+快速查看某段文本在当前 tokenizer 下的 token 数和 chunk 分布：
+
+```bash
+printf '你的文本内容' | python3 scripts/inspect_chunk_tokens.py
+python3 scripts/inspect_chunk_tokens.py docs/architecture.md
+```
+
 ## 当前目录
 
 ```text
@@ -58,5 +80,8 @@ scripts/
 - 轻量向量召回
 - 按意图动态调权
 - 融合打分与弱相关截断
+- 显式的 Elasticsearch / PGVector 适配器边界
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
+
+接口与核心方法备注说明规范见 [docs/development-standards.md](docs/development-standards.md)。

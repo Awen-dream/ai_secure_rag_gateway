@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from app.application.ingestion.tokenization import estimate_token_count
+from app.core.config import settings
 
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[。！？!?；;])|(?<=[.?!;])\s+")
 _NATURAL_BREAK_RE = re.compile(r"[，,、。！？!?；;\s]")
@@ -35,6 +36,21 @@ class _Block:
 class _Section:
     heading_path: list[str]
     blocks: list[_Block]
+
+
+def _resolve_chunk_limits(
+    max_tokens: int | None,
+    overlap_tokens: int | None,
+) -> tuple[int, int]:
+    resolved_max_tokens = max_tokens if max_tokens is not None else settings.chunk_max_tokens
+    resolved_overlap_tokens = overlap_tokens if overlap_tokens is not None else settings.chunk_overlap_tokens
+
+    resolved_max_tokens = max(int(resolved_max_tokens), 1)
+    resolved_overlap_tokens = max(int(resolved_overlap_tokens), 0)
+    if resolved_max_tokens == 1:
+        return resolved_max_tokens, 0
+
+    return resolved_max_tokens, min(resolved_overlap_tokens, resolved_max_tokens - 1)
 
 
 def _normalize_heading_title(title: str) -> str:
@@ -480,9 +496,10 @@ def _chunk_section(section: _Section, max_tokens: int, overlap_tokens: int) -> l
 
 def chunk_document(
     content: str,
-    max_tokens: int = 220,
-    overlap_tokens: int = 40,
+    max_tokens: int | None = None,
+    overlap_tokens: int | None = None,
 ) -> list[ChunkPayload]:
+    max_tokens, overlap_tokens = _resolve_chunk_limits(max_tokens, overlap_tokens)
     sections = _split_sections(content)
     if not sections:
         stripped = content.strip()
@@ -505,7 +522,7 @@ def chunk_document(
 
 def chunk_text(
     content: str,
-    max_tokens: int = 220,
-    overlap_tokens: int = 40,
+    max_tokens: int | None = None,
+    overlap_tokens: int | None = None,
 ) -> list[str]:
     return [chunk.text for chunk in chunk_document(content, max_tokens=max_tokens, overlap_tokens=overlap_tokens)]

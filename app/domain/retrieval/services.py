@@ -2,19 +2,31 @@ from app.application.query.intent import classify_query_intent
 from app.application.query.rewrite import rewrite_query
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
+from app.domain.retrieval.backends import BackendSearchHit, KeywordSearchBackend, VectorSearchBackend
 from app.domain.retrieval.models import RetrievalProfile
 from app.domain.retrieval.models import RetrievalResult
 from app.domain.retrieval.profiles import get_retrieval_profile
 from app.domain.retrieval.rerankers import sort_by_score
 from app.domain.retrieval.rerankers import weighted_fusion
-from app.domain.retrieval.retrievers import keyword_features, normalize_terms, vector_score
+from app.domain.retrieval.retrievers import normalize_terms
 
 
 class RetrievalService:
-    def __init__(self, document_service: DocumentService) -> None:
+    """Coordinates hybrid retrieval across explicit keyword and vector backends."""
+
+    def __init__(
+        self,
+        document_service: DocumentService,
+        keyword_backend: KeywordSearchBackend,
+        vector_backend: VectorSearchBackend,
+    ) -> None:
         self.document_service = document_service
+        self.keyword_backend = keyword_backend
+        self.vector_backend = vector_backend
 
     def retrieve(self, user: UserContext, query: str, top_k: int = 5) -> list[RetrievalResult]:
+        """Run permission-aware hybrid retrieval and return fused evidence chunks."""
+
         rewritten = rewrite_query(query)
         intent = classify_query_intent(rewritten)
         profile = get_retrieval_profile(intent)
@@ -29,46 +41,12 @@ class RetrievalService:
         terms: list[str],
         profile: RetrievalProfile,
     ) -> list[RetrievalResult]:
-        raw_candidates: list[RetrievalResult] = []
-        max_keyword = 0.0
-        max_vector = 0.0
+        """Fuse Elasticsearch-style keyword hits and PGVector-style semantic hits."""
 
-        for document, chunk in self.document_service.get_accessible_chunks(user):
-            keyword_raw, matched_terms = keyword_features(terms, document, chunk)
-            vector_raw = vector_score(query, document, chunk)
-            if keyword_raw <= 0 and vector_raw <= 0:
-                continue
-            max_keyword = max(max_keyword, keyword_raw)
-            max_vector = max(max_vector, vector_raw)
-            raw_candidates.append(
-                RetrievalResult(
-                    document=document,
-                    chunk=chunk,
-                    score=0.0,
-                    keyword_score=keyword_raw,
-                    vector_score=vector_raw,
-                    matched_terms=matched_terms,
-                    retrieval_sources=self._resolve_sources(keyword_raw, vector_raw),
-                )
-            )
-
-        normalized_candidates: list[RetrievalResult] = []
-        for item in raw_candidates:
-            keyword_normalized = item.keyword_score / max_keyword if max_keyword else 0.0
-            vector_normalized = item.vector_score / max_vector if max_vector else 0.0
-            title_boost = profile.title_boost if any(term in item.document.title.lower() for term in terms) else 0.0
-            item.score = weighted_fusion(
-                keyword_score=keyword_normalized,
-                vector_score=vector_normalized,
-                keyword_weight=profile.keyword_weight,
-                vector_weight=profile.vector_weight,
-                title_boost=title_boost,
-            )
-            item.keyword_score = round(keyword_normalized, 4)
-            item.vector_score = round(vector_normalized, 4)
-            normalized_candidates.append(item)
-
-        ranked_candidates = sort_by_score(normalized_candidates)
+        candidates = self.document_service.get_accessible_chunks(user)
+        keyword_hits = self.keyword_backend.search(query=query, terms=terms, candidates=candidates, top_k=profile.candidate_pool)
+        vector_hits = self.vector_backend.search(query=query, candidates=candidates, top_k=profile.candidate_pool)
+        ranked_candidates = sort_by_score(self._merge_backend_hits(keyword_hits, vector_hits, profile, terms))
         if not ranked_candidates:
             return []
 
@@ -81,10 +59,60 @@ class RetrievalService:
         return filtered_candidates[: profile.candidate_pool]
 
     @staticmethod
-    def _resolve_sources(keyword_raw: float, vector_raw: float) -> list[str]:
-        sources: list[str] = []
-        if keyword_raw > 0:
-            sources.append("keyword")
-        if vector_raw > 0:
-            sources.append("vector")
-        return sources
+    def _merge_backend_hits(
+        keyword_hits: list[BackendSearchHit],
+        vector_hits: list[BackendSearchHit],
+        profile: RetrievalProfile,
+        terms: list[str],
+    ) -> list[RetrievalResult]:
+        """Normalize backend scores and fuse them into a single candidate set."""
+
+        merged: dict[str, RetrievalResult] = {}
+        max_keyword = max((hit.score for hit in keyword_hits), default=0.0)
+        max_vector = max((hit.score for hit in vector_hits), default=0.0)
+
+        for hit in keyword_hits:
+            merged[hit.chunk.id] = RetrievalResult(
+                document=hit.document,
+                chunk=hit.chunk,
+                score=0.0,
+                keyword_score=hit.score,
+                vector_score=0.0,
+                matched_terms=hit.matched_terms,
+                retrieval_sources=[hit.backend],
+            )
+
+        for hit in vector_hits:
+            if hit.chunk.id not in merged:
+                merged[hit.chunk.id] = RetrievalResult(
+                    document=hit.document,
+                    chunk=hit.chunk,
+                    score=0.0,
+                    keyword_score=0.0,
+                    vector_score=hit.score,
+                    matched_terms=[],
+                    retrieval_sources=[hit.backend],
+                )
+                continue
+
+            existing = merged[hit.chunk.id]
+            existing.vector_score = hit.score
+            if hit.backend not in existing.retrieval_sources:
+                existing.retrieval_sources.append(hit.backend)
+
+        normalized_results: list[RetrievalResult] = []
+        for result in merged.values():
+            keyword_normalized = result.keyword_score / max_keyword if max_keyword else 0.0
+            vector_normalized = result.vector_score / max_vector if max_vector else 0.0
+            title_boost = profile.title_boost if any(term in result.document.title.lower() for term in terms) else 0.0
+            result.score = weighted_fusion(
+                keyword_score=keyword_normalized,
+                vector_score=vector_normalized,
+                keyword_weight=profile.keyword_weight,
+                vector_weight=profile.vector_weight,
+                title_boost=title_boost,
+            )
+            result.keyword_score = round(keyword_normalized, 4)
+            result.vector_score = round(vector_normalized, 4)
+            normalized_results.append(result)
+        return normalized_results

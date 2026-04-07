@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+from app.application.ingestion import pipelines
 from app.application.ingestion.pipelines import chunk_document, chunk_text, estimate_token_count
 
 
@@ -103,6 +105,18 @@ class ChunkTextTests(unittest.TestCase):
         self.assertGreaterEqual(len(code_chunks), 2)
         self.assertTrue(all("```python" in chunk.text for chunk in code_chunks))
         self.assertTrue(all("```" in chunk.text for chunk in code_chunks))
+
+    def test_chunk_document_uses_configured_default_limits(self) -> None:
+        content = "alpha beta gamma delta\n\nepsilon zeta eta theta\n\niota kappa lambda mu"
+
+        with patch.object(pipelines.settings, "chunk_max_tokens", 10), patch.object(
+            pipelines.settings, "chunk_overlap_tokens", 999
+        ):
+            chunks = chunk_document(content)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertIn("epsilon zeta eta theta", chunks[0].text)
+        self.assertIn("epsilon zeta eta theta", chunks[1].text)
 
 
 if __name__ == "__main__":

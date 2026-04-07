@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from app.application.ingestion.pipelines import chunk_document
 from app.domain.auth.models import UserContext
 from app.domain.auth.policies import can_access_department
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.documents.schemas import DocumentUploadRequest
+from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 
 
@@ -17,10 +19,19 @@ def utcnow() -> datetime:
 
 
 class DocumentService:
-    def __init__(self, repository: SQLiteRepository) -> None:
+    """Owns document lifecycle, permission-aware reads and retrieval index synchronization."""
+
+    def __init__(
+        self,
+        repository: SQLiteRepository,
+        indexing_service: Optional[RetrievalIndexingService] = None,
+    ) -> None:
         self.repository = repository
+        self.indexing_service = indexing_service
 
     def upload_document(self, payload: DocumentUploadRequest, user: UserContext) -> DocumentRecord:
+        """Create a new document version, persist chunks and refresh retrieval indexes."""
+
         content_hash = hashlib.sha256(payload.content.strip().encode("utf-8")).hexdigest()
         existing_document = self.repository.find_document_by_content_hash(user.tenant_id, content_hash)
         if existing_document:
@@ -75,9 +86,13 @@ class DocumentService:
 
         document.status = DocumentStatus.SUCCESS
         self.repository.save_document(document, chunks, [record.id for record in previous_versions])
+        if self.indexing_service:
+            self.indexing_service.upsert_document(document, chunks)
         return document
 
     def list_documents(self, user: UserContext) -> list[DocumentRecord]:
+        """List current documents visible under the caller's tenant and permission scope."""
+
         return [
             document
             for document in self.repository.list_documents(user.tenant_id)
@@ -85,14 +100,20 @@ class DocumentService:
         ]
 
     def reindex_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
+        """Refresh a document's retrieval indexes after metadata or content-level changes."""
+
         document = self.get_document(doc_id, user)
         document.status = DocumentStatus.INDEXING
         document.updated_at = utcnow()
         document.status = DocumentStatus.SUCCESS
         self.repository.update_document(document)
+        if self.indexing_service:
+            self.indexing_service.upsert_document(document, self.repository.list_chunks_for_document(doc_id))
         return document
 
     def get_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
+        """Load one document and enforce tenant plus permission boundaries."""
+
         document = self.repository.get_document(doc_id)
         if not document or document.tenant_id != user.tenant_id:
             raise KeyError(doc_id)
@@ -101,6 +122,8 @@ class DocumentService:
         return document
 
     def get_accessible_chunks(self, user: UserContext) -> list[tuple[DocumentRecord, DocumentChunk]]:
+        """Return only those chunks that are allowed to participate in retrieval."""
+
         results: list[tuple[DocumentRecord, DocumentChunk]] = []
         documents = {document.id: document for document in self.repository.list_documents(user.tenant_id)}
         for chunk in self.repository.list_chunks_for_tenant(user.tenant_id):
