@@ -28,6 +28,7 @@ def get_keyword_backend() -> ElasticsearchSearch:
         index_name=settings.elasticsearch_index,
         mode=settings.elasticsearch_mode,
         endpoint=settings.elasticsearch_endpoint,
+        auto_init_index=settings.elasticsearch_auto_init_index,
     )
 
 

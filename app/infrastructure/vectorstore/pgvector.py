@@ -7,7 +7,7 @@ from typing import Sequence
 
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.retrieval.backends import BackendSearchHit
-from app.domain.retrieval.models import RetrievalBackendInfo
+from app.domain.retrieval.models import RetrievalBackendHealth, RetrievalBackendInfo
 from app.domain.retrieval.retrievers import semantic_features, vector_score
 
 try:
@@ -47,6 +47,12 @@ class PGVectorStore:
         top_k: int,
     ) -> list[BackendSearchHit]:
         """Return semantic hits scored with a lightweight local similarity fallback."""
+
+        if self.can_execute() and candidates:
+            try:
+                return self._execute_search(query, candidates, top_k)
+            except Exception:
+                pass
 
         hits: list[BackendSearchHit] = []
         for document, chunk in candidates:
@@ -102,6 +108,27 @@ class PGVectorStore:
         """Return whether this adapter can talk to a real PostgreSQL + pgvector backend."""
 
         return self.mode == "postgres" and bool(self.dsn) and psycopg is not None
+
+    def health_check(self) -> RetrievalBackendHealth:
+        """Return reachability status for the configured PostgreSQL + pgvector backend."""
+
+        reachable = False
+        detail = {"dsn": self.dsn, "table_name": self.table_name}
+        if self.can_execute():
+            try:
+                with psycopg.connect(self.dsn) as connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT 1")
+                        cursor.fetchone()
+                reachable = True
+            except Exception as exc:
+                detail["error"] = str(exc)
+        return RetrievalBackendHealth(
+            backend=self.backend_name,
+            execute_enabled=self.can_execute(),
+            reachable=reachable,
+            detail=detail,
+        )
 
     def initialize_schema(self) -> dict:
         """Create pgvector extension and table when real execution mode is enabled."""
@@ -201,6 +228,7 @@ SELECT
     1 - (embedding <=> %(query_embedding)s) AS similarity_score
 FROM {self.table_name}
 WHERE tenant_id = %(tenant_id)s
+  AND chunk_id = ANY(%(chunk_ids)s::text[])
 ORDER BY embedding <=> %(query_embedding)s
 LIMIT {top_k};
 """.strip()
@@ -214,6 +242,45 @@ LIMIT {top_k};
         with psycopg.connect(self.dsn) as connection:
             with connection.cursor() as cursor:
                 cursor.executemany(sql, rows)
+
+    def _execute_search(
+        self,
+        query: str,
+        candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
+        top_k: int,
+    ) -> list[BackendSearchHit]:
+        """Execute a real pgvector similarity query and map results back to allowed candidates."""
+
+        if not self.can_execute():
+            return []
+
+        candidate_lookup = {chunk.id: (document, chunk) for document, chunk in candidates}
+        tenant_id = candidates[0][0].tenant_id
+        sql = self.build_search_sql(tenant_id, top_k)
+        params = {
+            "tenant_id": tenant_id,
+            "query_embedding": self._to_pgvector_literal(self._embed_text(query)),
+            "chunk_ids": list(candidate_lookup.keys()),
+        }
+        hits: list[BackendSearchHit] = []
+        with psycopg.connect(self.dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+        for row in rows:
+            chunk_id = row[0]
+            if chunk_id not in candidate_lookup:
+                continue
+            document, chunk = candidate_lookup[chunk_id]
+            hits.append(
+                BackendSearchHit(
+                    document=document,
+                    chunk=chunk,
+                    score=float(row[-1]),
+                    backend=self.backend_name,
+                )
+            )
+        return hits
 
     def _embed_text(self, text: str) -> list[float]:
         """Generate a deterministic local embedding so pgvector integration can be tested offline."""

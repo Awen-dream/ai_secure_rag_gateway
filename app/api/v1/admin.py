@@ -14,6 +14,7 @@ from app.domain.audit.services import AuditService
 from app.domain.prompts.models import PromptTemplate
 from app.domain.prompts.services import PromptService
 from app.domain.retrieval.models import (
+    RetrievalBackendHealth,
     RetrievalBackendInfo,
     RetrievalBackendPlan,
     RetrievalExplainRequest,
@@ -140,3 +141,29 @@ def init_pgvector_schema(
     """Initialize pgvector schema when PostgreSQL execution mode is configured."""
 
     return vector_backend.initialize_schema()
+
+
+@router.post("/retrieval/backends/elasticsearch/init-index")
+def init_elasticsearch_index(
+    _: UserContext = Depends(require_admin),
+    keyword_backend: ElasticsearchSearch = Depends(get_keyword_backend),
+) -> dict:
+    """Initialize the Elasticsearch index when remote execution mode is configured."""
+
+    return keyword_backend.initialize_index()
+
+
+@router.get("/retrieval/backends/{backend}/health", response_model=RetrievalBackendHealth)
+def get_retrieval_backend_health(
+    backend: str,
+    _: UserContext = Depends(require_admin),
+    keyword_backend: ElasticsearchSearch = Depends(get_keyword_backend),
+    vector_backend: PGVectorStore = Depends(get_vector_backend),
+) -> RetrievalBackendHealth:
+    """Return backend reachability information for retrieval infrastructure diagnostics."""
+
+    if backend == "elasticsearch":
+        return keyword_backend.health_check()
+    if backend == "pgvector":
+        return vector_backend.health_check()
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported retrieval backend.")

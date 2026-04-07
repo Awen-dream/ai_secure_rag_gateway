@@ -61,8 +61,10 @@ scripts/
 - `GET /api/v1/admin/policies`
 - `GET /api/v1/admin/audit`
 - `GET /api/v1/admin/retrieval/backends`
+- `GET /api/v1/admin/retrieval/backends/{backend}/health`
 - `POST /api/v1/admin/retrieval/explain`
 - `GET /api/v1/admin/retrieval/backends/{backend}/plan`
+- `POST /api/v1/admin/retrieval/backends/elasticsearch/init-index`
 - `POST /api/v1/admin/retrieval/backends/pgvector/init-schema`
 - `GET /api/v1/metrics/retrieval`
 
@@ -87,6 +89,7 @@ scripts/
 - 显式的 Elasticsearch / PGVector 适配器边界
 - 管理侧可查看后端配置与检索解释
 - PGVector DDL / upsert / search SQL 预览与 schema 初始化入口
+- ES mapping / bulk / search body 预览与索引初始化入口
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 

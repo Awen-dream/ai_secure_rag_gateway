@@ -57,3 +57,12 @@ class RetrievalBackendPlan(BaseModel):
     backend: str
     execute_enabled: bool
     artifacts: dict = Field(default_factory=dict)
+
+
+class RetrievalBackendHealth(BaseModel):
+    """Admin-facing backend health payload."""
+
+    backend: str
+    execute_enabled: bool
+    reachable: bool
+    detail: dict = Field(default_factory=dict)

@@ -12,6 +12,7 @@ class AppSettings(BaseModel):
     elasticsearch_index: str = os.getenv("APP_ELASTICSEARCH_INDEX", "knowledge_chunks")
     elasticsearch_mode: str = os.getenv("APP_ELASTICSEARCH_MODE", "local-fallback")
     elasticsearch_endpoint: Optional[str] = os.getenv("APP_ELASTICSEARCH_ENDPOINT")
+    elasticsearch_auto_init_index: bool = os.getenv("APP_ELASTICSEARCH_AUTO_INIT_INDEX", "false").lower() == "true"
     pgvector_table: str = os.getenv("APP_PGVECTOR_TABLE", "document_embeddings")
     pgvector_mode: str = os.getenv("APP_PGVECTOR_MODE", "local-fallback")
     pgvector_dsn: Optional[str] = os.getenv("APP_PGVECTOR_DSN")

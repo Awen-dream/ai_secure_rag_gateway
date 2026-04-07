@@ -86,6 +86,28 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertIn("upsert_sql", pg_payload["artifacts"])
         self.assertIn("search_sql", pg_payload["artifacts"])
 
+    def test_admin_can_view_backend_health(self) -> None:
+        es_response = self.client.get("/api/v1/admin/retrieval/backends/elasticsearch/health", headers=self.headers)
+        self.assertEqual(es_response.status_code, 200)
+        es_payload = es_response.json()
+        self.assertEqual(es_payload["backend"], "elasticsearch")
+        self.assertFalse(es_payload["execute_enabled"])
+        self.assertFalse(es_payload["reachable"])
+
+        pg_response = self.client.get("/api/v1/admin/retrieval/backends/pgvector/health", headers=self.headers)
+        self.assertEqual(pg_response.status_code, 200)
+        pg_payload = pg_response.json()
+        self.assertEqual(pg_payload["backend"], "pgvector")
+        self.assertFalse(pg_payload["execute_enabled"])
+        self.assertFalse(pg_payload["reachable"])
+
+    def test_elasticsearch_init_index_is_safe_in_fallback_mode(self) -> None:
+        response = self.client.post("/api/v1/admin/retrieval/backends/elasticsearch/init-index", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["backend"], "elasticsearch")
+        self.assertFalse(payload["executed"])
+
     def test_pgvector_init_schema_is_safe_in_fallback_mode(self) -> None:
         response = self.client.post("/api/v1/admin/retrieval/backends/pgvector/init-schema", headers=self.headers)
         self.assertEqual(response.status_code, 200)
