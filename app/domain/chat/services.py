@@ -14,7 +14,7 @@ from app.domain.prompts.services import PromptService
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
 from app.domain.risk.services import PolicyEngine
-from app.infrastructure.db.repositories.memory import store
+from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 
 
 def utcnow() -> datetime:
@@ -24,11 +24,13 @@ def utcnow() -> datetime:
 class ChatService:
     def __init__(
         self,
+        repository: SQLiteRepository,
         retrieval_service: RetrievalService,
         prompt_service: PromptService,
         policy_engine: PolicyEngine,
         audit_service: AuditService,
     ) -> None:
+        self.repository = repository
         self.retrieval_service = retrieval_service
         self.prompt_service = prompt_service
         self.policy_engine = policy_engine
@@ -46,8 +48,9 @@ class ChatService:
 
         self._append_message(session.id, "user", payload.query)
         self._append_message(session.id, "assistant", answer, citations)
-        session.summary = summarize_recent_messages(store.chat_messages.get(session.id, []))
+        session.summary = summarize_recent_messages(self.repository.list_messages(session.id))
         session.updated_at = utcnow()
+        self.repository.save_session(session)
 
         latency_ms = int((utcnow() - started_at).total_seconds() * 1000)
         self.audit_service.write_log(
@@ -72,21 +75,17 @@ class ChatService:
         )
 
     def list_sessions(self, user: UserContext) -> list[ChatSession]:
-        return [
-            session
-            for session in store.chat_sessions.values()
-            if session.tenant_id == user.tenant_id and session.user_id == user.user_id
-        ]
+        return self.repository.list_sessions(user.tenant_id, user.user_id)
 
     def get_session_detail(self, session_id: str, user: UserContext) -> dict[str, Any]:
-        session = store.chat_sessions.get(session_id)
+        session = self.repository.get_session(session_id)
         if not session or session.tenant_id != user.tenant_id or session.user_id != user.user_id:
             raise KeyError(session_id)
-        return {"session": session, "messages": store.chat_messages.get(session_id, [])}
+        return {"session": session, "messages": self.repository.list_messages(session_id)}
 
     def _get_or_create_session(self, payload: ChatQueryRequest, user: UserContext) -> ChatSession:
         if payload.session_id:
-            session = store.chat_sessions.get(payload.session_id)
+            session = self.repository.get_session(payload.session_id)
             if not session or session.tenant_id != user.tenant_id or session.user_id != user.user_id:
                 raise KeyError(payload.session_id)
             return session
@@ -101,13 +100,11 @@ class ChatService:
             created_at=now,
             updated_at=now,
         )
-        store.chat_sessions[session.id] = session
-        store.chat_messages[session.id] = []
+        self.repository.save_session(session)
         return session
 
-    @staticmethod
-    def _append_message(session_id: str, role: str, content: str, citations=None) -> None:
-        store.chat_messages.setdefault(session_id, []).append(
+    def _append_message(self, session_id: str, role: str, content: str, citations=None) -> None:
+        self.repository.append_message(
             ChatMessage(
                 id=f"msg_{uuid.uuid4().hex[:12]}",
                 session_id=session_id,

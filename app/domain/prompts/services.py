@@ -1,15 +1,16 @@
 from app.domain.prompts.models import PromptTemplate
-from app.infrastructure.db.repositories.memory import store
+from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 
 
 class PromptService:
-    def __init__(self) -> None:
+    def __init__(self, repository: SQLiteRepository) -> None:
+        self.repository = repository
         self._bootstrap_defaults()
 
     def _bootstrap_defaults(self) -> None:
-        if "standard_qa" in store.prompt_templates:
+        if self.repository.list_prompt_templates("standard_qa"):
             return
-        store.prompt_templates["standard_qa"] = [
+        self.repository.save_prompt_template(
             PromptTemplate(
                 id="prompt_standard_v1",
                 scene="standard_qa",
@@ -22,20 +23,17 @@ class PromptService:
                 ),
                 output_schema={"sections": "conclusion,evidence,citations"},
             )
-        ]
+        )
 
     def list_templates(self) -> list[PromptTemplate]:
-        items: list[PromptTemplate] = []
-        for templates in store.prompt_templates.values():
-            items.extend(templates)
-        return items
+        return self.repository.list_prompt_templates()
 
     def add_template(self, template: PromptTemplate) -> PromptTemplate:
-        store.prompt_templates.setdefault(template.scene, []).append(template)
+        self.repository.save_prompt_template(template)
         return template
 
     def get_template(self, scene: str) -> PromptTemplate:
-        templates = [template for template in store.prompt_templates.get(scene, []) if template.enabled]
+        templates = [template for template in self.repository.list_prompt_templates(scene) if template.enabled]
         if not templates:
             raise KeyError(scene)
         return max(templates, key=lambda item: item.version)

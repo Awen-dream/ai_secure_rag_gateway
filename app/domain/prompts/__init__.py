@@ -1,0 +1,1 @@
+"""Prompts domain package."""

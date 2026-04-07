@@ -4,12 +4,12 @@ import hashlib
 import uuid
 from datetime import datetime
 
-from app.application.ingestion.pipelines import chunk_text
+from app.application.ingestion.pipelines import chunk_document
 from app.domain.auth.models import UserContext
 from app.domain.auth.policies import can_access_department
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.documents.schemas import DocumentUploadRequest
-from app.infrastructure.db.repositories.memory import store
+from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 
 
 def utcnow() -> datetime:
@@ -17,16 +17,16 @@ def utcnow() -> datetime:
 
 
 class DocumentService:
+    def __init__(self, repository: SQLiteRepository) -> None:
+        self.repository = repository
+
     def upload_document(self, payload: DocumentUploadRequest, user: UserContext) -> DocumentRecord:
         content_hash = hashlib.sha256(payload.content.strip().encode("utf-8")).hexdigest()
-        if content_hash in store.content_hashes:
-            return store.documents[store.content_hashes[content_hash]]
+        existing_document = self.repository.find_document_by_content_hash(user.tenant_id, content_hash)
+        if existing_document:
+            return existing_document
 
-        previous_versions = [
-            doc
-            for doc in store.documents.values()
-            if doc.tenant_id == user.tenant_id and doc.title == payload.title
-        ]
+        previous_versions = self.repository.list_documents_by_title(user.tenant_id, payload.title)
         version = max((doc.version for doc in previous_versions), default=0) + 1
         now = utcnow()
 
@@ -52,32 +52,35 @@ class DocumentService:
         for record in previous_versions:
             record.current = False
 
+        chunk_payloads = chunk_document(payload.content)
         chunks = [
             DocumentChunk(
                 id=f"chunk_{uuid.uuid4().hex[:12]}",
                 doc_id=document.id,
                 tenant_id=document.tenant_id,
                 chunk_index=index,
-                section_name=f"Section {index + 1}",
-                text=chunk,
-                token_count=max(len(chunk.split()), 1),
+                section_name=chunk.section_name,
+                text=chunk.text,
+                token_count=chunk.token_count,
                 security_level=document.security_level,
                 department_scope=document.department_scope,
-                metadata_json={"title": document.title},
+                metadata_json={
+                    "title": document.title,
+                    "section_name": chunk.section_name,
+                    "heading_path": " > ".join(chunk.heading_path),
+                },
             )
-            for index, chunk in enumerate(chunk_text(payload.content))
+            for index, chunk in enumerate(chunk_payloads)
         ]
 
         document.status = DocumentStatus.SUCCESS
-        store.documents[document.id] = document
-        store.document_chunks[document.id] = chunks
-        store.content_hashes[content_hash] = document.id
+        self.repository.save_document(document, chunks, [record.id for record in previous_versions])
         return document
 
     def list_documents(self, user: UserContext) -> list[DocumentRecord]:
         return [
             document
-            for document in store.documents.values()
+            for document in self.repository.list_documents(user.tenant_id)
             if document.tenant_id == user.tenant_id and self._has_document_access(document, user)
         ]
 
@@ -86,10 +89,11 @@ class DocumentService:
         document.status = DocumentStatus.INDEXING
         document.updated_at = utcnow()
         document.status = DocumentStatus.SUCCESS
+        self.repository.update_document(document)
         return document
 
     def get_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
-        document = store.documents.get(doc_id)
+        document = self.repository.get_document(doc_id)
         if not document or document.tenant_id != user.tenant_id:
             raise KeyError(doc_id)
         if not self._has_document_access(document, user):
@@ -98,12 +102,15 @@ class DocumentService:
 
     def get_accessible_chunks(self, user: UserContext) -> list[tuple[DocumentRecord, DocumentChunk]]:
         results: list[tuple[DocumentRecord, DocumentChunk]] = []
-        for doc_id, document in store.documents.items():
+        documents = {document.id: document for document in self.repository.list_documents(user.tenant_id)}
+        for chunk in self.repository.list_chunks_for_tenant(user.tenant_id):
+            document = documents.get(chunk.doc_id)
+            if not document:
+                continue
             if document.tenant_id != user.tenant_id or not self._has_document_access(document, user):
                 continue
-            for chunk in store.document_chunks.get(doc_id, []):
-                if self._has_chunk_access(chunk, user):
-                    results.append((document, chunk))
+            if self._has_chunk_access(chunk, user):
+                results.append((document, chunk))
         return results
 
     @staticmethod

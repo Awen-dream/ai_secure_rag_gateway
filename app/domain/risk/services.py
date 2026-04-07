@@ -1,25 +1,25 @@
 from app.domain.auth.models import UserContext
 from app.domain.risk.models import PolicyDefinition, RiskAction
 from app.domain.risk.rules import baseline_policy
-from app.infrastructure.db.repositories.memory import store
+from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 
 
 class PolicyEngine:
-    def __init__(self) -> None:
-        if not store.policies:
-            policy = baseline_policy()
-            store.policies[policy.id] = policy
+    def __init__(self, repository: SQLiteRepository) -> None:
+        self.repository = repository
+        if not self.repository.list_policies():
+            self.repository.save_policy(baseline_policy())
 
     def list_policies(self) -> list[PolicyDefinition]:
-        return list(store.policies.values())
+        return self.repository.list_policies()
 
     def add_policy(self, policy: PolicyDefinition) -> PolicyDefinition:
-        store.policies[policy.id] = policy
+        self.repository.save_policy(policy)
         return policy
 
     def evaluate(self, user: UserContext, query: str, matched_chunks: int) -> tuple[RiskAction, str]:
         normalized = query.lower()
-        for policy in store.policies.values():
+        for policy in self.repository.list_policies():
             if not policy.enabled:
                 continue
             if any(term in normalized for term in policy.high_risk_terms):

@@ -5,7 +5,7 @@ from app.domain.audit.models import AuditLog, RetrievalMetrics
 from app.domain.auth.models import UserContext
 from app.domain.retrieval.models import RetrievalResult
 from app.domain.risk.models import RiskAction
-from app.infrastructure.db.repositories.memory import store
+from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 
 
 def utcnow() -> datetime:
@@ -13,6 +13,9 @@ def utcnow() -> datetime:
 
 
 class AuditService:
+    def __init__(self, repository: SQLiteRepository) -> None:
+        self.repository = repository
+
     def write_log(
         self,
         user: UserContext,
@@ -25,7 +28,7 @@ class AuditService:
         action: str,
         latency_ms: int,
     ) -> None:
-        store.audit_logs.append(
+        self.repository.append_audit_log(
             AuditLog(
                 id=f"audit_{uuid.uuid4().hex[:12]}",
                 user_id=user.user_id,
@@ -51,15 +54,16 @@ class AuditService:
         )
 
     def list_logs(self) -> list[AuditLog]:
-        return store.audit_logs
+        return self.repository.list_audit_logs()
 
     def retrieval_metrics(self) -> RetrievalMetrics:
-        total = len(store.audit_logs)
+        logs = self.repository.list_audit_logs()
+        total = len(logs)
         if total == 0:
             return RetrievalMetrics()
-        citation_hits = sum(1 for log in store.audit_logs if log.retrieval_docs_json)
-        refusals = sum(1 for log in store.audit_logs if log.action == RiskAction.REFUSE.value)
-        avg_latency = sum(log.latency_ms for log in store.audit_logs) / total
+        citation_hits = sum(1 for log in logs if log.retrieval_docs_json)
+        refusals = sum(1 for log in logs if log.action == RiskAction.REFUSE.value)
+        avg_latency = sum(log.latency_ms for log in logs) / total
         return RetrievalMetrics(
             total_queries=total,
             citation_coverage_rate=round(citation_hits / total, 3),
@@ -68,8 +72,9 @@ class AuditService:
         )
 
     def risk_metrics(self) -> dict:
-        total = len(store.audit_logs)
+        logs = self.repository.list_audit_logs()
+        total = len(logs)
         distribution: dict[str, int] = {}
-        for log in store.audit_logs:
+        for log in logs:
             distribution[log.risk_level] = distribution.get(log.risk_level, 0) + 1
         return {"total_requests": total, "risk_distribution": distribution}

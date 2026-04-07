@@ -50,4 +50,4 @@ scripts/
 
 ## 说明
 
-当前版本仍然使用内存存储与规则检索，但代码边界已经按企业级落地方向拆开，后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时可以直接替换基础设施层实现。
+当前版本已经切到本地 SQLite 持久化与规则检索，文档、会话、模板、策略、审计会落盘到 `APP_SQLITE_PATH`。后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时可以直接替换基础设施层实现。
