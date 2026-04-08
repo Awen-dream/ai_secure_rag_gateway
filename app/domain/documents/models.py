@@ -29,6 +29,7 @@ class DocumentRecord(BaseModel):
     security_level: int
     version: int = 1
     status: DocumentStatus = DocumentStatus.PENDING
+    last_error: Optional[str] = None
     content_hash: str
     created_at: datetime
     updated_at: datetime

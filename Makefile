@@ -1,8 +1,11 @@
-PYTHON ?= python
+PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; elif command -v python3 >/dev/null 2>&1; then command -v python3; else command -v python; fi)
 COMPOSE_FILE ?= docker-compose.integration.yml
 
 UNIT_TESTS = \
 	app.tests.unit.test_access_filter \
+	app.tests.unit.test_document_parser \
+	app.tests.unit.test_document_ingestion_orchestrator \
+	app.tests.unit.test_docs_file_upload \
 	app.tests.unit.test_ingestion_pipelines \
 	app.tests.unit.test_import \
 	app.tests.unit.test_hybrid_retrieval \

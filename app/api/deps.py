@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.core.config import settings
 from app.application.conversation.session_cache import SessionCache
 from app.application.query.retrieval_cache import RetrievalCache
@@ -18,6 +19,7 @@ from app.infrastructure.db.repositories.postgres import PostgresRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
+from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
 
@@ -109,10 +111,33 @@ def get_indexing_service() -> RetrievalIndexingService:
 
 
 @lru_cache
-def get_document_service() -> DocumentService:
-    """Return the document domain service with repository and index sync dependencies wired."""
+def get_document_source_store() -> LocalDocumentSourceStore:
+    """Return the local staging store that keeps raw uploads available for background ingestion."""
 
-    return DocumentService(get_repository(), get_indexing_service())
+    return LocalDocumentSourceStore(settings.document_staging_dir)
+
+
+@lru_cache
+def get_document_ingestion_orchestrator() -> DocumentIngestionOrchestrator:
+    """Return the document ingestion orchestrator used by synchronous and background upload flows."""
+
+    return DocumentIngestionOrchestrator(
+        repository=get_repository(),
+        indexing_service=get_indexing_service(),
+        source_store=get_document_source_store(),
+    )
+
+
+@lru_cache
+def get_document_service() -> DocumentService:
+    """Return the document domain service with repository, staging and orchestration dependencies wired."""
+
+    return DocumentService(
+        repository=get_repository(),
+        indexing_service=get_indexing_service(),
+        source_store=get_document_source_store(),
+        ingestion_orchestrator=get_document_ingestion_orchestrator(),
+    )
 
 
 @lru_cache

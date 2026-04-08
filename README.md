@@ -112,7 +112,10 @@ scripts/
 - `GET /healthz`
 - `GET /api/v1/auth/me`
 - `POST /api/v1/docs/upload`
+- `POST /api/v1/docs/upload-file`
+- `GET /api/v1/docs/{doc_id}`
 - `GET /api/v1/docs`
+- `POST /api/v1/docs/{doc_id}/retry`
 - `POST /api/v1/chat/query`
 - `POST /api/v1/chat/stream`
 - `GET /api/v1/admin/prompts`
@@ -168,6 +171,7 @@ scripts/
 - PostgreSQL 仓储
 - 统一仓储契约，服务层无感切换
 - PostgreSQL 初始化 SQL，见 `migrations/0001_postgres_metadata.sql`
+- `documents.last_error`，用于追踪失败原因与重试
 
 当前缓存层已包含：
 
@@ -188,6 +192,17 @@ scripts/
 - 密钥/口令/令牌类内容拒答
 - 高敏部门输出降级为仅返回引用
 - 输出侧风险动作会回写到问答响应和审计日志
+
+当前文档接入层已包含：
+
+- JSON 文本上传
+- multipart 文件上传
+- `PDF / DOCX / Markdown / HTML / Text` 解析
+- HTML 标签剥离与块级换行保留
+- DOCX `word/document.xml` 文本抽取
+- 本地 staging source store，支持把原始上传文件与文本暂存到 `APP_DOCUMENT_STAGING_DIR`
+- 文档状态机：`pending -> parsing -> chunking -> embedding -> indexing -> success/failed`
+- `async_mode` 后台入库，可通过 `retry` 入口重试失败文档
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 

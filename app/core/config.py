@@ -31,6 +31,7 @@ class AppSettings(BaseModel):
     chunk_tokenizer_encoding: Optional[str] = os.getenv("CHUNK_TOKENIZER_ENCODING")
     chunk_max_tokens: int = int(os.getenv("CHUNK_MAX_TOKENS", "400"))
     chunk_overlap_tokens: int = int(os.getenv("CHUNK_OVERLAP_TOKENS", "60"))
+    document_staging_dir: str = os.getenv("APP_DOCUMENT_STAGING_DIR", ".data/staging/documents")
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")

@@ -5,13 +5,14 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from app.application.ingestion.pipelines import chunk_document
+from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.auth.filter_builder import build_access_filter
 from app.domain.auth.models import UserContext
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.documents.schemas import DocumentUploadRequest
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.infrastructure.db.repositories.base import MetadataRepository
+from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
 
 
 def utcnow() -> datetime:
@@ -25,14 +26,51 @@ class DocumentService:
         self,
         repository: MetadataRepository,
         indexing_service: Optional[RetrievalIndexingService] = None,
+        source_store: Optional[LocalDocumentSourceStore] = None,
+        ingestion_orchestrator: Optional[DocumentIngestionOrchestrator] = None,
     ) -> None:
         self.repository = repository
         self.indexing_service = indexing_service
+        self.source_store = source_store
+        self.ingestion_orchestrator = ingestion_orchestrator
 
     def upload_document(self, payload: DocumentUploadRequest, user: UserContext) -> DocumentRecord:
-        """Create a new document version, persist chunks and refresh retrieval indexes."""
+        """Register one text upload and optionally process it inline."""
 
-        content_hash = hashlib.sha256(payload.content.strip().encode("utf-8")).hexdigest()
+        return self._register_document(
+            payload=payload,
+            user=user,
+            source_bytes=payload.content.encode("utf-8"),
+            process_async=payload.async_mode,
+        )
+
+    def upload_document_file(
+        self,
+        payload: DocumentUploadRequest,
+        user: UserContext,
+        file_bytes: bytes,
+        process_async: bool = False,
+    ) -> DocumentRecord:
+        """Register one file upload and optionally process it outside the request path."""
+
+        return self._register_document(
+            payload=payload,
+            user=user,
+            source_bytes=file_bytes,
+            process_async=process_async,
+        )
+
+    def _register_document(
+        self,
+        payload: DocumentUploadRequest,
+        user: UserContext,
+        source_bytes: bytes,
+        process_async: bool,
+    ) -> DocumentRecord:
+        """Create a pending document version, stage its source bytes and optionally process it immediately."""
+
+        normalized_source_bytes = source_bytes if source_bytes else payload.content.strip().encode("utf-8")
+        content_hash = hashlib.sha256(normalized_source_bytes).hexdigest()
         existing_document = self.repository.find_document_by_content_hash(user.tenant_id, content_hash)
         if existing_document:
             return existing_document
@@ -52,43 +90,22 @@ class DocumentService:
             visibility_scope=payload.visibility_scope,
             security_level=payload.security_level,
             version=version,
-            status=DocumentStatus.INDEXING,
+            status=DocumentStatus.PENDING,
+            last_error=None,
             content_hash=content_hash,
             created_at=now,
             updated_at=now,
             tags=payload.tags,
-            current=True,
+            current=False,
         )
 
-        for record in previous_versions:
-            record.current = False
+        if self.source_store:
+            self.source_store.save_source(document.id, document.source_type, normalized_source_bytes)
 
-        chunk_payloads = chunk_document(payload.content)
-        chunks = [
-            DocumentChunk(
-                id=f"chunk_{uuid.uuid4().hex[:12]}",
-                doc_id=document.id,
-                tenant_id=document.tenant_id,
-                chunk_index=index,
-                section_name=chunk.section_name,
-                text=chunk.text,
-                token_count=chunk.token_count,
-                security_level=document.security_level,
-                department_scope=document.department_scope,
-                metadata_json={
-                    "title": document.title,
-                    "section_name": chunk.section_name,
-                    "heading_path": " > ".join(chunk.heading_path),
-                },
-            )
-            for index, chunk in enumerate(chunk_payloads)
-        ]
-
-        document.status = DocumentStatus.SUCCESS
-        self.repository.save_document(document, chunks, [record.id for record in previous_versions])
-        if self.indexing_service:
-            self.indexing_service.upsert_document(document, chunks)
-        return document
+        self.repository.save_document(document, [], [])
+        if process_async or not self.ingestion_orchestrator:
+            return document
+        return self.ingestion_orchestrator.process_document(document.id)
 
     def list_documents(self, user: UserContext) -> list[DocumentRecord]:
         """List current documents visible under the caller's tenant and permission scope."""
@@ -111,6 +128,14 @@ class DocumentService:
         if self.indexing_service:
             self.indexing_service.upsert_document(document, self.repository.list_chunks_for_document(doc_id))
         return document
+
+    def retry_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
+        """Reset one failed document to pending so the background ingestion flow can try again."""
+
+        document = self.get_document(doc_id, user)
+        if not self.ingestion_orchestrator:
+            raise RuntimeError("Document ingestion orchestrator is not configured.")
+        return self.ingestion_orchestrator.retry_document(document.id)
 
     def get_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
         """Load one document and enforce tenant plus permission boundaries."""

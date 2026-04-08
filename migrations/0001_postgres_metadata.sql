@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS documents (
     security_level INTEGER NOT NULL,
     version INTEGER NOT NULL,
     status TEXT NOT NULL,
+    last_error TEXT,
     content_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,

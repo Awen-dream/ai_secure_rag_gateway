@@ -5,3 +5,5 @@ tiktoken
 psycopg[binary]
 httpx
 redis
+pypdf
+python-multipart

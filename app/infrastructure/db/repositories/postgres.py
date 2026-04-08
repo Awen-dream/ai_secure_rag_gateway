@@ -50,6 +50,7 @@ class PostgresRepository:
                     security_level INTEGER NOT NULL,
                     version INTEGER NOT NULL,
                     status TEXT NOT NULL,
+                    last_error TEXT,
                     content_hash TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL,
@@ -58,6 +59,7 @@ class PostgresRepository:
                 )
                 """
             )
+            connection.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS last_error TEXT")
             connection.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_tenant_content_hash
@@ -199,8 +201,8 @@ class PostgresRepository:
                 """
                 INSERT INTO documents (
                     id, tenant_id, title, source_type, source_uri, owner_id, department_scope, visibility_scope,
-                    security_level, version, status, content_hash, created_at, updated_at, tags, current
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    security_level, version, status, last_error, content_hash, created_at, updated_at, tags, current
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     tenant_id = EXCLUDED.tenant_id,
                     title = EXCLUDED.title,
@@ -212,6 +214,7 @@ class PostgresRepository:
                     security_level = EXCLUDED.security_level,
                     version = EXCLUDED.version,
                     status = EXCLUDED.status,
+                    last_error = EXCLUDED.last_error,
                     content_hash = EXCLUDED.content_hash,
                     created_at = EXCLUDED.created_at,
                     updated_at = EXCLUDED.updated_at,
@@ -230,6 +233,7 @@ class PostgresRepository:
                     document.security_level,
                     document.version,
                     document.status.value,
+                    document.last_error,
                     document.content_hash,
                     document.created_at,
                     document.updated_at,
@@ -267,12 +271,13 @@ class PostgresRepository:
             connection.execute(
                 """
                 UPDATE documents
-                SET status = %s, updated_at = %s, current = %s, security_level = %s,
+                SET status = %s, last_error = %s, updated_at = %s, current = %s, security_level = %s,
                     department_scope = %s::jsonb, visibility_scope = %s::jsonb, tags = %s::jsonb
                 WHERE id = %s
                 """,
                 (
                     document.status.value,
+                    document.last_error,
                     document.updated_at,
                     document.current,
                     document.security_level,
@@ -490,6 +495,7 @@ class PostgresRepository:
             security_level=row["security_level"],
             version=row["version"],
             status=row["status"],
+            last_error=row.get("last_error"),
             content_hash=row["content_hash"],
             created_at=self._to_datetime(row["created_at"]),
             updated_at=self._to_datetime(row["updated_at"]),

@@ -13,3 +13,4 @@ class DocumentUploadRequest(BaseModel):
     visibility_scope: List[str] = Field(default_factory=lambda: ["tenant"])
     security_level: int = Field(default=1, ge=0, le=10)
     tags: List[str] = Field(default_factory=list)
+    async_mode: bool = False

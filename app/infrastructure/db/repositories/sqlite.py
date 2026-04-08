@@ -46,6 +46,7 @@ class SQLiteRepository:
                     security_level INTEGER NOT NULL,
                     version INTEGER NOT NULL,
                     status TEXT NOT NULL,
+                    last_error TEXT,
                     content_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -128,6 +129,11 @@ class SQLiteRepository:
                 );
                 """
             )
+            existing_document_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            if "last_error" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN last_error TEXT")
 
     @staticmethod
     def _dump_json(value) -> str:
@@ -165,8 +171,8 @@ class SQLiteRepository:
                 """
                 INSERT OR REPLACE INTO documents (
                     id, tenant_id, title, source_type, source_uri, owner_id, department_scope, visibility_scope,
-                    security_level, version, status, content_hash, created_at, updated_at, tags, current
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    security_level, version, status, last_error, content_hash, created_at, updated_at, tags, current
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document.id,
@@ -180,6 +186,7 @@ class SQLiteRepository:
                     document.security_level,
                     document.version,
                     document.status.value,
+                    document.last_error,
                     document.content_hash,
                     document.created_at.isoformat(),
                     document.updated_at.isoformat(),
@@ -219,11 +226,12 @@ class SQLiteRepository:
             connection.execute(
                 """
                 UPDATE documents
-                SET status = ?, updated_at = ?, current = ?, security_level = ?, department_scope = ?, visibility_scope = ?, tags = ?
+                SET status = ?, last_error = ?, updated_at = ?, current = ?, security_level = ?, department_scope = ?, visibility_scope = ?, tags = ?
                 WHERE id = ?
                 """,
                 (
                     document.status.value,
+                    document.last_error,
                     document.updated_at.isoformat(),
                     int(document.current),
                     document.security_level,
@@ -419,6 +427,7 @@ class SQLiteRepository:
             security_level=row["security_level"],
             version=row["version"],
             status=row["status"],
+            last_error=row["last_error"],
             content_hash=row["content_hash"],
             created_at=self._to_datetime(row["created_at"]),
             updated_at=self._to_datetime(row["updated_at"]),
