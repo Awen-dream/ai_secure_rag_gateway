@@ -1,7 +1,6 @@
-PYTHON ?= .venv/bin/python
-PIP ?= .venv/bin/pip
-UVICORN ?= .venv/bin/uvicorn
+PYTHON ?= python
 COMPOSE_FILE ?= docker-compose.integration.yml
+
 UNIT_TESTS = \
 	app.tests.unit.test_ingestion_pipelines \
 	app.tests.unit.test_import \
@@ -12,6 +11,7 @@ UNIT_TESTS = \
 	app.tests.unit.test_chat_llm_integration \
 	app.tests.unit.test_retrieval_backends \
 	app.tests.unit.test_admin_retrieval_endpoints
+
 INTEGRATION_TESTS = \
 	app.tests.integration.test_pg_es_retrieval_integration \
 	app.tests.integration.test_postgres_metadata_repository_integration \
@@ -20,10 +20,10 @@ INTEGRATION_TESTS = \
 .PHONY: install run test-unit test-integration test-all integration-up integration-down compile
 
 install:
-	$(PIP) install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements.txt
 
 run:
-	$(UVICORN) app.main:app --reload
+	$(PYTHON) -m uvicorn app.main:app --reload
 
 compile:
 	PYTHONPYCACHEPREFIX=/tmp/pycache $(PYTHON) -m py_compile $$(find app -name '*.py' -print) main.py
