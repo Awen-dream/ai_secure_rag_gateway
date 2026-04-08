@@ -25,6 +25,11 @@ class ExternalSourceItem:
     source_kind: str
     external_document_id: str
     title: str | None = None
+    space_id: str | None = None
+    node_token: str | None = None
+    parent_node_token: str | None = None
+    obj_type: str | None = None
+    has_child: bool = False
 
 
 @dataclass(frozen=True)
@@ -46,7 +51,14 @@ class ExternalSourceConnector(Protocol):
     def fetch_document(self, source: str) -> ExternalDocumentContent:
         """Fetch one external document and return a normalized payload."""
 
-    def list_sources(self, cursor: str | None = None, limit: int = 20) -> ExternalSourcePage:
+    def list_sources(
+        self,
+        cursor: str | None = None,
+        limit: int = 20,
+        source_root: str | None = None,
+        space_id: str | None = None,
+        parent_node_token: str | None = None,
+    ) -> ExternalSourcePage:
         """List externally discoverable sources for incremental or paginated sync."""
 
     def health_check(self) -> dict:

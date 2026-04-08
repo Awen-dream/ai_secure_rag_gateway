@@ -14,6 +14,9 @@ from app.domain.sources.schemas import (
     FeishuBatchSyncResponse,
     FeishuImportRequest,
     FeishuImportResponse,
+    FeishuListSourceItemResponse,
+    FeishuListSourcesRequest,
+    FeishuListSourcesResponse,
     SourceSyncAction,
 )
 from app.infrastructure.external_sources.base import ExternalSourceConnector, ExternalSourceItem
@@ -146,6 +149,9 @@ class FeishuSourceSyncService:
                     "cursor": payload.cursor,
                     "limit": payload.limit,
                     "listing_mode": not payload.items,
+                    "source_root": payload.source_root,
+                    "space_id": payload.space_id,
+                    "parent_node_token": payload.parent_node_token,
                 },
                 result_items_json=[item.model_dump() for item in results],
                 total=summary.total,
@@ -165,6 +171,22 @@ class FeishuSourceSyncService:
         """Return persisted sync runs for the current tenant and connector."""
 
         return self.repository.list_source_sync_runs(user.tenant_id, self.feishu_client.provider)
+
+    def list_sources(self, payload: FeishuListSourcesRequest) -> FeishuListSourcesResponse:
+        """List Feishu spaces or nodes for admin exploration and sync preparation."""
+
+        page = self.feishu_client.list_sources(
+            cursor=payload.cursor,
+            limit=payload.limit,
+            source_root=payload.source_root,
+            space_id=payload.space_id,
+            parent_node_token=payload.parent_node_token,
+        )
+        return FeishuListSourcesResponse(
+            listed_count=len(page.items),
+            next_cursor=page.next_cursor,
+            items=[self._to_list_item_response(item) for item in page.items],
+        )
 
     def health_check(self) -> dict:
         """Return Feishu client health for admin diagnostics."""
@@ -196,7 +218,15 @@ class FeishuSourceSyncService:
         if payload.items:
             return list(payload.items), len(payload.items), None
 
-        page = self.feishu_client.list_sources(cursor=payload.cursor, limit=payload.limit)
+        if not payload.source_root and not payload.space_id:
+            raise ValueError("Feishu sync listing requires source_root or space_id when items are not provided.")
+        page = self.feishu_client.list_sources(
+            cursor=payload.cursor,
+            limit=payload.limit,
+            source_root=payload.source_root,
+            space_id=payload.space_id,
+            parent_node_token=payload.parent_node_token,
+        )
         items = [self._build_listed_import_request(item, payload) for item in page.items]
         return items, len(page.items), page.next_cursor
 
@@ -214,4 +244,18 @@ class FeishuSourceSyncService:
             security_level=payload.default_security_level,
             tags=list(payload.default_tags),
             async_mode=payload.default_async_mode,
+        )
+
+    @staticmethod
+    def _to_list_item_response(item: ExternalSourceItem) -> FeishuListSourceItemResponse:
+        return FeishuListSourceItemResponse(
+            source=item.source,
+            source_kind=item.source_kind,
+            external_document_id=item.external_document_id,
+            title=item.title,
+            space_id=item.space_id,
+            node_token=item.node_token,
+            parent_node_token=item.parent_node_token,
+            obj_type=item.obj_type,
+            has_child=item.has_child,
         )

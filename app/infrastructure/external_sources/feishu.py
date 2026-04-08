@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from app.infrastructure.external_sources.base import ExternalSourcePage
+from app.infrastructure.external_sources.base import ExternalSourceItem, ExternalSourcePage
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,7 @@ class FeishuClient:
         token = self.get_tenant_access_token()
 
         if reference.source_kind == "wiki":
-            resolved = self.resolve_wiki_node(reference.token, token)
+            resolved = self.get_node(reference.token, token)
             if resolved["obj_type"] != "docx":
                 raise ValueError("Current Feishu integration only supports wiki nodes backed by docx documents.")
             document = self.fetch_docx_document(resolved["obj_token"], token)
@@ -103,14 +103,39 @@ class FeishuClient:
             external_document_id=reference.token,
         )
 
-    def list_sources(self, cursor: str | None = None, limit: int = 20) -> ExternalSourcePage:
-        """List Feishu sources for paginated sync.
+    def list_sources(
+        self,
+        cursor: str | None = None,
+        limit: int = 20,
+        source_root: str | None = None,
+        space_id: str | None = None,
+        parent_node_token: str | None = None,
+    ) -> ExternalSourcePage:
+        """List Feishu spaces or wiki child nodes with cursor-based pagination."""
 
-        The gateway now supports cursor-based batch sync orchestration, but the real Feishu
-        collection listing flow is connector-specific and has not been wired yet.
-        """
+        token = self.get_tenant_access_token()
+        page_size = max(1, min(int(limit), 200))
+        page_token = cursor or None
 
-        raise RuntimeError("Feishu source listing is not configured for this connector yet.")
+        if source_root:
+            scope = self._resolve_listing_scope(source_root, token)
+            space_id = scope["space_id"]
+            parent_node_token = scope["parent_node_token"]
+
+        if space_id:
+            return self._list_space_nodes(
+                access_token=token,
+                space_id=space_id,
+                page_token=page_token,
+                page_size=page_size,
+                parent_node_token=parent_node_token,
+            )
+
+        return self._list_spaces(
+            access_token=token,
+            page_token=page_token,
+            page_size=page_size,
+        )
 
     def health_check(self) -> dict:
         """Return whether Feishu credentials are configured and tenant token retrieval succeeds."""
@@ -149,7 +174,7 @@ class FeishuClient:
             raise RuntimeError("Feishu tenant token response did not include tenant_access_token")
         return str(token)
 
-    def resolve_wiki_node(self, token: str, access_token: str) -> dict[str, str]:
+    def get_node(self, token: str, access_token: str) -> dict[str, str]:
         """Resolve one wiki node token into its backing object token and type."""
 
         payload = self._request(
@@ -167,10 +192,18 @@ class FeishuClient:
         if not obj_token or not obj_type:
             raise RuntimeError("Feishu wiki node response is missing obj_token or obj_type")
         return {
+            "space_id": str(node.get("space_id") or ""),
+            "node_token": str(node.get("node_token") or token),
             "obj_token": str(obj_token),
             "obj_type": str(obj_type),
+            "parent_node_token": str(node.get("parent_node_token") or ""),
             "title": str(node.get("title") or ""),
         }
+
+    def resolve_wiki_node(self, token: str, access_token: str) -> dict[str, str]:
+        """Backward-compatible alias for one wiki node lookup."""
+
+        return self.get_node(token, access_token)
 
     def fetch_docx_document(self, token: str, access_token: str) -> dict[str, str]:
         """Fetch raw content for one Feishu docx document."""
@@ -189,6 +222,103 @@ class FeishuClient:
             "title": str(title or token),
             "content": content.strip(),
         }
+
+    def _resolve_listing_scope(self, source_root: str, access_token: str) -> dict[str, str]:
+        reference = self.parse_source(source_root)
+        if reference.source_kind != "wiki":
+            raise ValueError("Feishu listing currently requires a wiki root URL or wiki token.")
+        node = self.get_node(reference.token, access_token)
+        if not node.get("space_id"):
+            raise RuntimeError("Feishu node response did not include space_id.")
+        return {
+            "space_id": node["space_id"],
+            "parent_node_token": node.get("node_token") or reference.token,
+        }
+
+    def _list_spaces(
+        self,
+        access_token: str,
+        page_token: str | None,
+        page_size: int,
+    ) -> ExternalSourcePage:
+        payload = self._request(
+            "GET",
+            "/wiki/v2/spaces",
+            access_token=access_token,
+            params={
+                "page_size": str(page_size),
+                **({"page_token": page_token} if page_token else {}),
+            },
+        )
+        data = payload.get("data", {})
+        items = data.get("items") if isinstance(data, dict) else []
+        page_items: list[ExternalSourceItem] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            current_space_id = str(item.get("space_id") or "")
+            if not current_space_id:
+                continue
+            page_items.append(
+                ExternalSourceItem(
+                    source=f"feishu://space/{current_space_id}",
+                    source_kind="space",
+                    external_document_id=current_space_id,
+                    title=str(item.get("name") or current_space_id),
+                    space_id=current_space_id,
+                    has_child=True,
+                )
+            )
+        return ExternalSourcePage(
+            items=page_items,
+            next_cursor=str(data.get("page_token") or "") if data.get("has_more") else None,
+        )
+
+    def _list_space_nodes(
+        self,
+        access_token: str,
+        space_id: str,
+        page_token: str | None,
+        page_size: int,
+        parent_node_token: str | None,
+    ) -> ExternalSourcePage:
+        params: dict[str, str] = {"page_size": str(page_size)}
+        if page_token:
+            params["page_token"] = page_token
+        if parent_node_token:
+            params["parent_node_token"] = parent_node_token
+        payload = self._request(
+            "GET",
+            f"/wiki/v2/spaces/{space_id}/nodes",
+            access_token=access_token,
+            params=params,
+        )
+        data = payload.get("data", {})
+        items = data.get("items") if isinstance(data, dict) else []
+        page_items: list[ExternalSourceItem] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            node_token = str(item.get("node_token") or "")
+            if not node_token:
+                continue
+            page_items.append(
+                ExternalSourceItem(
+                    source=f"https://feishu.cn/wiki/{node_token}",
+                    source_kind="wiki",
+                    external_document_id=str(item.get("obj_token") or node_token),
+                    title=str(item.get("title") or node_token),
+                    space_id=str(item.get("space_id") or space_id),
+                    node_token=node_token,
+                    parent_node_token=str(item.get("parent_node_token") or ""),
+                    obj_type=str(item.get("obj_type") or ""),
+                    has_child=bool(item.get("has_child")),
+                )
+            )
+        return ExternalSourcePage(
+            items=page_items,
+            next_cursor=str(data.get("page_token") or "") if data.get("has_more") else None,
+        )
 
     def _request(
         self,

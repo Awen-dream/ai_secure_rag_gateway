@@ -34,7 +34,14 @@ class _FakeFeishuClient:
     def health_check(self) -> dict:
         return {"backend": "feishu", "execute_enabled": True, "reachable": True}
 
-    def list_sources(self, cursor: Optional[str] = None, limit: int = 20) -> ExternalSourcePage:
+    def list_sources(
+        self,
+        cursor: Optional[str] = None,
+        limit: int = 20,
+        source_root: Optional[str] = None,
+        space_id: Optional[str] = None,
+        parent_node_token: Optional[str] = None,
+    ) -> ExternalSourcePage:
         start = int(cursor or "0")
         selected = self.listed_sources[start : start + limit]
         next_cursor = str(start + limit) if start + limit < len(self.listed_sources) else None
@@ -42,8 +49,12 @@ class _FakeFeishuClient:
             ExternalSourceItem(
                 source=source,
                 source_kind="wiki",
-                external_document_id=source.rstrip("/").split("/")[-1],
+                external_document_id="wiki_token",
                 title=f"Listed {index}",
+                space_id=space_id or "space_1",
+                node_token=source.rstrip("/").split("/")[-1],
+                parent_node_token=parent_node_token or "root_node",
+                obj_type="docx",
             )
             for index, source in enumerate(selected, start=start + 1)
         ]
@@ -208,6 +219,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         response = self.client.post(
             "/api/v1/admin/sources/feishu/sync",
             json={
+                "source_root": "https://example.feishu.cn/wiki/root_node",
                 "cursor": "0",
                 "limit": 2,
                 "default_department_scope": ["engineering"],
@@ -221,6 +233,29 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["listed_count"], 2)
         self.assertEqual(payload["next_cursor"], "2")
         self.assertEqual(payload["succeeded"], 2)
+
+    def test_admin_can_list_feishu_sources(self) -> None:
+        fake_client = _FakeFeishuClient()
+        fake_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+            "https://example.feishu.cn/wiki/wiki_token_2",
+        ]
+        self.get_feishu_source_sync_service().feishu_client = fake_client
+
+        response = self.client.post(
+            "/api/v1/admin/sources/feishu/list",
+            json={
+                "source_root": "https://example.feishu.cn/wiki/root_node",
+                "cursor": "0",
+                "limit": 1,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["listed_count"], 1)
+        self.assertEqual(payload["next_cursor"], "1")
+        self.assertEqual(payload["items"][0]["source_kind"], "wiki")
 
     def test_admin_can_view_feishu_sync_runs(self) -> None:
         self.get_feishu_source_sync_service().feishu_client = _FakeFeishuClient()
@@ -376,6 +411,8 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["intent"], "standard_qa")
+        self.assertGreater(payload["intent_confidence"], 0)
+        self.assertIsInstance(payload["intent_reasons"], list)
         self.assertGreaterEqual(len(payload["results"]), 1)
         self.assertIn("elasticsearch", payload["results"][0]["retrieval_sources"])
         self.assertIn("pgvector", payload["results"][0]["retrieval_sources"])

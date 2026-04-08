@@ -38,8 +38,14 @@ from app.domain.retrieval.models import (
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import PolicyDefinition
 from app.domain.risk.services import PolicyEngine
-from app.domain.sources.schemas import FeishuImportRequest, FeishuImportResponse
-from app.domain.sources.schemas import FeishuBatchSyncRequest, FeishuBatchSyncResponse
+from app.domain.sources.schemas import (
+    FeishuBatchSyncRequest,
+    FeishuBatchSyncResponse,
+    FeishuImportRequest,
+    FeishuImportResponse,
+    FeishuListSourcesRequest,
+    FeishuListSourcesResponse,
+)
 from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue
@@ -273,6 +279,17 @@ def get_feishu_source_health(
     """Return Feishu connector reachability and credential configuration status."""
 
     return service.health_check()
+
+
+@router.post("/sources/feishu/list", response_model=FeishuListSourcesResponse)
+def list_feishu_sources(
+    payload: FeishuListSourcesRequest,
+    _: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> FeishuListSourcesResponse:
+    """List Feishu spaces or child wiki nodes for admin exploration and sync preparation."""
+
+    return service.list_sources(payload)
 
 
 @router.post("/sources/feishu/import", response_model=FeishuImportResponse)

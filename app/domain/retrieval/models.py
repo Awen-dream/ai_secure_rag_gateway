@@ -47,6 +47,8 @@ class RetrievalExplainResponse(BaseModel):
 
     rewritten_query: str
     intent: str
+    intent_confidence: float = 0.0
+    intent_reasons: List[str] = Field(default_factory=list)
     profile: RetrievalProfile
     results: List[RetrievalResult] = Field(default_factory=list)
 

@@ -36,6 +36,9 @@ class FeishuImportResponse(BaseModel):
 
 class FeishuBatchSyncRequest(BaseModel):
     items: List[FeishuImportRequest] = Field(default_factory=list)
+    source_root: Optional[str] = None
+    space_id: Optional[str] = None
+    parent_node_token: Optional[str] = None
     cursor: Optional[str] = None
     limit: int = Field(default=20, ge=1, le=200)
     continue_on_error: bool = True
@@ -58,6 +61,32 @@ class FeishuBatchSyncItemResponse(BaseModel):
     queued: bool = False
     task_id: Optional[str] = None
     error: Optional[str] = None
+
+
+class FeishuListSourcesRequest(BaseModel):
+    source_root: Optional[str] = None
+    space_id: Optional[str] = None
+    parent_node_token: Optional[str] = None
+    cursor: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+class FeishuListSourceItemResponse(BaseModel):
+    source: str
+    source_kind: str
+    external_document_id: str
+    title: Optional[str] = None
+    space_id: Optional[str] = None
+    node_token: Optional[str] = None
+    parent_node_token: Optional[str] = None
+    obj_type: Optional[str] = None
+    has_child: bool = False
+
+
+class FeishuListSourcesResponse(BaseModel):
+    listed_count: int
+    next_cursor: Optional[str] = None
+    items: List[FeishuListSourceItemResponse] = Field(default_factory=list)
 
 
 class FeishuBatchSyncResponse(BaseModel):

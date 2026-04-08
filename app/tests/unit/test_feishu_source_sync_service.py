@@ -7,7 +7,7 @@ from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
 from app.domain.retrieval.indexing import RetrievalIndexingService
-from app.domain.sources.schemas import FeishuBatchSyncRequest, FeishuImportRequest
+from app.domain.sources.schemas import FeishuBatchSyncRequest, FeishuImportRequest, FeishuListSourcesRequest
 from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
@@ -47,7 +47,14 @@ class _FakeFeishuClient:
     def health_check(self) -> dict:
         return {"backend": "feishu", "execute_enabled": True, "reachable": True}
 
-    def list_sources(self, cursor: Optional[str] = None, limit: int = 20) -> ExternalSourcePage:
+    def list_sources(
+        self,
+        cursor: Optional[str] = None,
+        limit: int = 20,
+        source_root: Optional[str] = None,
+        space_id: Optional[str] = None,
+        parent_node_token: Optional[str] = None,
+    ) -> ExternalSourcePage:
         start = int(cursor or "0")
         selected = self.listed_sources[start : start + limit]
         next_cursor = str(start + limit) if start + limit < len(self.listed_sources) else None
@@ -55,8 +62,12 @@ class _FakeFeishuClient:
             ExternalSourceItem(
                 source=source,
                 source_kind="wiki",
-                external_document_id=source.rstrip("/").split("/")[-1],
+                external_document_id="wiki_token",
                 title=f"Listed {index}",
+                space_id=space_id or "space_1",
+                node_token=source.rstrip("/").split("/")[-1],
+                parent_node_token=parent_node_token or "root_node",
+                obj_type="docx",
             )
             for index, source in enumerate(selected, start=start + 1)
         ]
@@ -271,6 +282,7 @@ class FeishuSourceSyncServiceTest(unittest.TestCase):
 
         response = self.service.sync_sources(
             FeishuBatchSyncRequest(
+                source_root="https://example.feishu.cn/wiki/root_node",
                 cursor="0",
                 limit=2,
                 default_department_scope=["finance"],
@@ -285,6 +297,25 @@ class FeishuSourceSyncServiceTest(unittest.TestCase):
         self.assertEqual(response.succeeded, 2)
         self.assertEqual(response.items[0].source, "https://example.feishu.cn/wiki/wiki_token_1")
         self.assertEqual(response.items[1].source, "https://example.feishu.cn/wiki/wiki_token_2")
+
+    def test_list_sources_returns_connector_page(self) -> None:
+        self.feishu_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+            "https://example.feishu.cn/wiki/wiki_token_2",
+        ]
+
+        response = self.service.list_sources(
+            FeishuListSourcesRequest(
+                source_root="https://example.feishu.cn/wiki/root_node",
+                cursor="0",
+                limit=1,
+            )
+        )
+
+        self.assertEqual(response.listed_count, 1)
+        self.assertEqual(response.next_cursor, "1")
+        self.assertEqual(response.items[0].source_kind, "wiki")
+        self.assertEqual(response.items[0].obj_type, "docx")
 
 
 if __name__ == "__main__":
