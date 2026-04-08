@@ -23,7 +23,11 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
-source .venv/bin/activate
+if [[ -f .venv/bin/activate ]]; then
+  # Prefer the project virtualenv locally when it exists.
+  source .venv/bin/activate
+fi
+
 python -m unittest \
   app.tests.integration.test_pg_es_retrieval_integration \
   app.tests.integration.test_postgres_metadata_repository_integration \

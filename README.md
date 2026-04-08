@@ -16,10 +16,10 @@ uvicorn app.main:app --reload
 
 ## PGVector + Elasticsearch 联调
 
-先准备项目虚拟环境依赖，然后运行联调脚本：
+先安装项目依赖，然后运行联调脚本：
 
 ```bash
-.venv/bin/pip install -r requirements.txt
+python -m pip install -r requirements.txt
 bash scripts/run_pg_es_integration.sh
 ```
 
@@ -27,7 +27,7 @@ bash scripts/run_pg_es_integration.sh
 
 - 用 `docker-compose.integration.yml` 启动本地 `pgvector` 和 `elasticsearch`
 - 等待两个容器健康
-- 用项目 `.venv` 跑真实集成测试
+- 优先使用项目 `.venv`，否则沿用当前 `python` 跑真实集成测试
 
 也可以直接用 `Makefile`：
 
