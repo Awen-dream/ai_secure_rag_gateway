@@ -10,6 +10,7 @@ from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.retrieval.backends import BackendSearchHit
 from app.domain.retrieval.models import RetrievalBackendHealth, RetrievalBackendInfo
 from app.domain.retrieval.retrievers import semantic_features, vector_score
+from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
 
 try:
     import psycopg
@@ -34,12 +35,14 @@ class PGVectorStore:
         mode: str = "local-fallback",
         dsn: str | None = None,
         auto_init_schema: bool = False,
+        embedding_client: OpenAIEmbeddingClient | None = None,
     ) -> None:
         self.table_name = table_name
         self.embedding_dimension = embedding_dimension
         self.mode = mode
         self.dsn = dsn
         self.auto_init_schema = auto_init_schema
+        self.embedding_client = embedding_client
 
     def search(
         self,
@@ -74,7 +77,7 @@ class PGVectorStore:
     def upsert_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
         """Sync or preview vector index updates for the given document."""
 
-        rows = self.build_upsert_rows(document, chunks)
+        rows = self.build_upsert_rows(document, chunks, use_runtime_embeddings=self.can_execute())
         executed = False
         if self.can_execute() and rows:
             if self.auto_init_schema:
@@ -102,8 +105,17 @@ class PGVectorStore:
                 "embedding_dimension": self.embedding_dimension,
                 "dsn": self.dsn,
                 "auto_init_schema": self.auto_init_schema,
+                "embedding_provider": self.embedding_client.provider if self.embedding_client else "local-fallback",
+                "embedding_execute_enabled": bool(self.embedding_client and self.embedding_client.can_execute()),
             },
-            capabilities=["vector_search", "cosine_distance", "metadata_filtering", "upsert_preview", "ddl_preview"],
+            capabilities=[
+                "vector_search",
+                "cosine_distance",
+                "metadata_filtering",
+                "upsert_preview",
+                "ddl_preview",
+                "remote_embeddings",
+            ],
         )
 
     def can_execute(self) -> bool:
@@ -202,9 +214,18 @@ ON CONFLICT (chunk_id) DO UPDATE SET
     embedding = EXCLUDED.embedding;
 """.strip()
 
-    def build_upsert_rows(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> list[dict]:
-        """Build parameter rows for pgvector upserts using deterministic local embeddings."""
+    def build_upsert_rows(
+        self,
+        document: DocumentRecord,
+        chunks: Sequence[DocumentChunk],
+        use_runtime_embeddings: bool = False,
+    ) -> list[dict]:
+        """Build parameter rows for pgvector upserts using remote or deterministic embeddings."""
 
+        embeddings = self._embed_texts(
+            [chunk.text for chunk in chunks],
+            use_runtime_embeddings=use_runtime_embeddings,
+        )
         return [
             {
                 "chunk_id": chunk.id,
@@ -221,9 +242,9 @@ ON CONFLICT (chunk_id) DO UPDATE SET
                 "current": document.current,
                 "status": document.status.value,
                 "metadata_json": json.dumps(chunk.metadata_json, ensure_ascii=False),
-                "embedding": self._to_pgvector_literal(self._embed_text(chunk.text)),
+                "embedding": self._to_pgvector_literal(embeddings[index]),
             }
-            for chunk in chunks
+            for index, chunk in enumerate(chunks)
         ]
 
     def build_search_sql(self, access_filter: AccessFilter, top_k: int) -> str:
@@ -279,7 +300,9 @@ LIMIT {top_k};
         candidate_lookup = {chunk.id: (document, chunk) for document, chunk in candidates}
         sql = self.build_search_sql(access_filter, top_k)
         params = access_filter.build_pgvector_params(list(candidate_lookup.keys()))
-        params["query_embedding"] = self._to_pgvector_literal(self._embed_text(query))
+        params["query_embedding"] = self._to_pgvector_literal(
+            self._embed_text(query, use_runtime_embeddings=self.can_execute())
+        )
         hits: list[BackendSearchHit] = []
         with psycopg.connect(self.dsn) as connection:
             with connection.cursor() as cursor:
@@ -300,7 +323,24 @@ LIMIT {top_k};
             )
         return hits
 
-    def _embed_text(self, text: str) -> list[float]:
+    def _embed_text(self, text: str, use_runtime_embeddings: bool = False) -> list[float]:
+        """Generate one embedding via the configured provider or deterministic local fallback."""
+
+        return self._embed_texts([text], use_runtime_embeddings=use_runtime_embeddings)[0]
+
+    def _embed_texts(self, texts: Sequence[str], use_runtime_embeddings: bool = False) -> list[list[float]]:
+        """Generate embeddings for multiple texts via the configured provider or local fallback."""
+
+        if use_runtime_embeddings and self.embedding_client and self.embedding_client.can_execute():
+            try:
+                vectors = self.embedding_client.embed_texts(texts)
+                if vectors:
+                    return vectors
+            except Exception:
+                pass
+        return [self._local_embed_text(text) for text in texts]
+
+    def _local_embed_text(self, text: str) -> list[float]:
         """Generate a deterministic local embedding so pgvector integration can be tested offline."""
 
         vector = [0.0] * self.embedding_dimension

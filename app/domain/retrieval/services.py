@@ -14,8 +14,7 @@ from app.domain.retrieval.models import (
     RetrievalResult,
 )
 from app.domain.retrieval.profiles import get_retrieval_profile
-from app.domain.retrieval.rerankers import sort_by_score
-from app.domain.retrieval.rerankers import weighted_fusion
+from app.domain.retrieval.rerankers import HeuristicReranker, sort_by_score, weighted_fusion
 from app.domain.retrieval.retrievers import normalize_terms
 
 
@@ -28,11 +27,13 @@ class RetrievalService:
         keyword_backend: KeywordSearchBackend,
         vector_backend: VectorSearchBackend,
         retrieval_cache: RetrievalCache | None = None,
+        reranker: HeuristicReranker | None = None,
     ) -> None:
         self.document_service = document_service
         self.keyword_backend = keyword_backend
         self.vector_backend = vector_backend
         self.retrieval_cache = retrieval_cache
+        self.reranker = reranker
 
     def retrieve(self, user: UserContext, query: str, top_k: int = 5) -> list[RetrievalResult]:
         """Run permission-aware hybrid retrieval and return fused evidence chunks."""
@@ -105,6 +106,8 @@ class RetrievalService:
             for item in ranked_candidates
             if item.score >= profile.min_score and item.score >= top_score * profile.relative_score_cutoff
         ]
+        if self.reranker:
+            filtered_candidates = self.reranker.rerank(query, filtered_candidates)
         return filtered_candidates[: profile.candidate_pool]
 
     @staticmethod

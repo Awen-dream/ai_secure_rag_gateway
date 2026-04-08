@@ -101,6 +101,39 @@ make run-ingestion-worker
 - `APP_DOCUMENT_INGESTION_QUEUE_NAME`
 - `APP_DOCUMENT_INGESTION_WORKER_POLL_SECONDS`
 
+## 飞书数据源
+
+当前已支持从 Feishu 导入 `docx` 文档和 `wiki` 节点背后的 `docx` 文档。
+
+相关环境变量：
+
+- `APP_FEISHU_BASE_URL`
+- `APP_FEISHU_APP_ID`
+- `APP_FEISHU_APP_SECRET`
+
+导入接口：
+
+- `POST /api/v1/admin/sources/feishu/import`
+
+健康检查接口：
+
+- `GET /api/v1/admin/sources/feishu/health`
+
+## Embedding 与 Rerank
+
+当前 PGVector 已支持切换到真实 embedding provider，并在混合检索后执行可插拔 reranker。
+
+相关环境变量：
+
+- `APP_EMBEDDING_PROVIDER`
+- `APP_EMBEDDING_API_KEY`
+- `APP_EMBEDDING_BASE_URL`
+- `APP_EMBEDDING_MODEL`
+- `APP_EMBEDDING_TIMEOUT_SECONDS`
+- `APP_EMBEDDING_DIMENSIONS`
+- `APP_RERANKER_MODE`
+- `APP_RERANKER_TOP_N`
+
 快速查看某段文本在当前 tokenizer 下的 token 数和 chunk 分布：
 
 ```bash
@@ -140,6 +173,8 @@ scripts/
 - `GET /api/v1/admin/retrieval/backends/{backend}/health`
 - `GET /api/v1/admin/cache/health`
 - `GET /api/v1/admin/queue/document-ingestion/health`
+- `GET /api/v1/admin/sources/feishu/health`
+- `POST /api/v1/admin/sources/feishu/import`
 - `POST /api/v1/admin/retrieval/explain`
 - `GET /api/v1/admin/retrieval/backends/{backend}/plan`
 - `POST /api/v1/admin/retrieval/backends/elasticsearch/init-index`
@@ -168,11 +203,13 @@ scripts/
 - 关键词召回
 - 轻量向量召回
 - 按意图动态调权
+- 启发式 reranker
 - 融合打分与弱相关截断
 - 显式的 Elasticsearch / PGVector 适配器边界
 - 管理侧可查看后端配置与检索解释
 - PGVector DDL / upsert / search SQL 预览与 schema 初始化入口
 - ES mapping / bulk / search body 预览与索引初始化入口
+- OpenAI-compatible embedding provider 接口，可替换本地 deterministic embedding
 
 当前生成层已包含：
 
@@ -220,6 +257,14 @@ scripts/
 - 文档状态机：`pending -> parsing -> chunking -> embedding -> indexing -> success/failed`
 - `async_mode` 时只负责入队，真实解析/切分/索引由独立 ingestion worker 消费 `APP_DOCUMENT_INGESTION_QUEUE_NAME`
 - 可通过 `retry` 入口重试失败文档
+- 飞书外部数据源导入：支持 `docx` 链接和 `wiki` 节点链接导入
+
+当前外部数据源层已包含：
+
+- Feishu tenant token 交换
+- Feishu `docx raw_content` 抓取
+- Feishu `wiki -> docx` 节点解析
+- 管理侧导入接口，导入后直接复用文档异步 ingest 队列
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 

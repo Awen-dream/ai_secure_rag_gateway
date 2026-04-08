@@ -7,12 +7,15 @@ UNIT_TESTS = \
 	app.tests.unit.test_document_ingestion_orchestrator \
 	app.tests.unit.test_document_ingestion_worker \
 	app.tests.unit.test_docs_file_upload \
+	app.tests.unit.test_feishu_client \
+	app.tests.unit.test_feishu_source_sync_service \
 	app.tests.unit.test_ingestion_pipelines \
 	app.tests.unit.test_import \
 	app.tests.unit.test_hybrid_retrieval \
 	app.tests.unit.test_cache_services \
 	app.tests.unit.test_chat_rate_limit \
 	app.tests.unit.test_openai_client \
+	app.tests.unit.test_openai_embeddings \
 	app.tests.unit.test_chat_llm_integration \
 	app.tests.unit.test_chat_output_guard_integration \
 	app.tests.unit.test_output_guard \

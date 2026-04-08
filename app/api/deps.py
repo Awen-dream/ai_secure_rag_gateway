@@ -9,15 +9,19 @@ from app.domain.chat.services import ChatService
 from app.domain.documents.services import DocumentService
 from app.domain.prompts.services import PromptService
 from app.domain.retrieval.indexing import RetrievalIndexingService
+from app.domain.retrieval.rerankers import HeuristicReranker
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.output_guard import OutputGuard
 from app.domain.risk.rate_limit import RateLimitService
 from app.domain.risk.services import PolicyEngine
+from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.db.repositories.postgres import PostgresRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
+from app.infrastructure.external_sources.feishu import FeishuClient
 from app.infrastructure.llm.openai_client import OpenAIClient
+from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue, DocumentIngestionWorker
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
@@ -98,6 +102,7 @@ def get_vector_backend() -> PGVectorStore:
         mode=settings.pgvector_mode,
         dsn=settings.pgvector_dsn,
         auto_init_schema=settings.pgvector_auto_init_schema,
+        embedding_client=get_embedding_client(),
     )
 
 
@@ -205,6 +210,27 @@ def get_openai_client() -> OpenAIClient:
 
 
 @lru_cache
+def get_embedding_client() -> OpenAIEmbeddingClient:
+    """Return the embedding client used by vector indexing and semantic retrieval."""
+
+    return OpenAIEmbeddingClient(
+        api_key=settings.embedding_api_key,
+        model=settings.embedding_model,
+        base_url=settings.embedding_base_url,
+        timeout_seconds=settings.embedding_timeout_seconds,
+        dimensions=settings.embedding_dimensions,
+        enabled=settings.embedding_provider == "openai",
+    )
+
+
+@lru_cache
+def get_retrieval_reranker() -> HeuristicReranker:
+    """Return the active reranker used after first-pass hybrid retrieval fusion."""
+
+    return HeuristicReranker(mode=settings.reranker_mode, top_n=settings.reranker_top_n)
+
+
+@lru_cache
 def get_retrieval_service() -> RetrievalService:
     """Return the hybrid retrieval service backed by Elasticsearch and PGVector adapters."""
 
@@ -213,6 +239,7 @@ def get_retrieval_service() -> RetrievalService:
         keyword_backend=get_keyword_backend(),
         vector_backend=get_vector_backend(),
         retrieval_cache=get_retrieval_cache(),
+        reranker=get_retrieval_reranker(),
     )
 
 
@@ -229,4 +256,27 @@ def get_chat_service() -> ChatService:
         audit_service=get_audit_service(),
         openai_client=get_openai_client(),
         session_cache=get_session_cache(),
+    )
+
+
+@lru_cache
+def get_feishu_client() -> FeishuClient:
+    """Return the Feishu connector used by admin-triggered external source imports."""
+
+    return FeishuClient(
+        base_url=settings.feishu_base_url,
+        app_id=settings.feishu_app_id,
+        app_secret=settings.feishu_app_secret,
+    )
+
+
+@lru_cache
+def get_feishu_source_sync_service() -> FeishuSourceSyncService:
+    """Return the Feishu external source import service."""
+
+    return FeishuSourceSyncService(
+        feishu_client=get_feishu_client(),
+        document_service=get_document_service(),
+        task_queue=get_document_task_queue(),
+        ingestion_orchestrator=get_document_ingestion_orchestrator(),
     )

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.deps import (
     get_audit_service,
     get_document_task_queue,
+    get_feishu_source_sync_service,
     get_keyword_backend,
     get_policy_engine,
     get_prompt_service,
@@ -26,6 +27,8 @@ from app.domain.retrieval.models import (
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import PolicyDefinition
 from app.domain.risk.services import PolicyEngine
+from app.domain.sources.schemas import FeishuImportRequest, FeishuImportResponse
+from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
@@ -201,3 +204,24 @@ def get_document_ingestion_queue_health(
     """Return document-ingestion queue reachability and queue-depth information."""
 
     return task_queue.health()
+
+
+@router.get("/sources/feishu/health")
+def get_feishu_source_health(
+    _: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> dict:
+    """Return Feishu connector reachability and credential configuration status."""
+
+    return service.health_check()
+
+
+@router.post("/sources/feishu/import", response_model=FeishuImportResponse)
+def import_feishu_source(
+    payload: FeishuImportRequest,
+    user: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> FeishuImportResponse:
+    """Import one Feishu docx or wiki-backed doc into the gateway document pipeline."""
+
+    return service.import_source(payload, user)
