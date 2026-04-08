@@ -86,7 +86,10 @@ class QueryUnderstandingServiceTest(unittest.TestCase):
         )
         service = QueryUnderstandingService(client)
 
-        result = service.understand("报销制度第2版编号是多少？")
+        result = service.understand(
+            "报销制度第2版编号是多少？",
+            session_summary="最近在讨论报销制度各个版本的差异。",
+        )
 
         self.assertEqual(result.rewritten_query, result.rule_rewritten_query)
         self.assertIn("missing_critical_terms", result.reasons)

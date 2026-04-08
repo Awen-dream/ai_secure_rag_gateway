@@ -12,6 +12,7 @@ from app.infrastructure.llm.openai_client import OpenAIClient
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 _ALLOWED_INTENTS = {"exact_lookup", "summary", "standard_qa"}
+_FOLLOW_UP_MARKER_RE = re.compile(r"(?:这个|那个|它|上面的|继续|刚才|上一轮|前面|呢[？?]?)")
 _VERSION_RE = re.compile(r"(?:第\s*\d+\s*版|\bv\s*\d+(?:\.\d+)*\b|\bversion\s*\d+(?:\.\d+)*\b)", re.IGNORECASE)
 _IDENTIFIER_RE = re.compile(
     r"(?:\b[A-Z]{2,}-\d+\b|\b[a-z]+[_-]id\b|\bdoc[_-]?\d+\b|\b[a-z0-9]{6,}[-_][a-z0-9]{2,}\b)",
@@ -124,13 +125,15 @@ class QueryUnderstandingService:
         normalized = rewrite_query(query)
         if last_user_query or session_summary:
             return True
-        if len(normalized) <= 18:
-            return True
         if fallback.intent == "summary":
             return True
-        if fallback.confidence < 0.8:
+        if _FOLLOW_UP_MARKER_RE.search(normalized):
             return True
-        return normalized != fallback.rewritten_query
+        if fallback.confidence < 0.45:
+            return True
+        if len(normalized) <= 6:
+            return True
+        return False
 
     @staticmethod
     def _build_instructions() -> str:
