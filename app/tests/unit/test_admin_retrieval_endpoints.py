@@ -25,9 +25,11 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         from app.api.deps import (
             get_audit_service,
             get_chat_service,
+            get_document_ingestion_worker,
             get_document_service,
             get_document_ingestion_orchestrator,
             get_document_source_store,
+            get_document_task_queue,
             get_indexing_service,
             get_keyword_backend,
             get_openai_client,
@@ -49,11 +51,13 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_session_cache,
             get_retrieval_cache,
             get_rate_limit_service,
+            get_document_task_queue,
             get_keyword_backend,
             get_vector_backend,
             get_document_source_store,
             get_indexing_service,
             get_document_ingestion_orchestrator,
+            get_document_ingestion_worker,
             get_document_service,
             get_prompt_service,
             get_policy_engine,
@@ -91,6 +95,15 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["backend"], "redis")
         self.assertFalse(payload["execute_enabled"])
         self.assertTrue(payload["reachable"])
+
+    def test_admin_can_view_document_ingestion_queue_health(self) -> None:
+        response = self.client.get("/api/v1/admin/queue/document-ingestion/health", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["backend"], "redis")
+        self.assertFalse(payload["execute_enabled"])
+        self.assertTrue(payload["reachable"])
+        self.assertIn("queue_depth", payload)
 
     def test_admin_can_view_backend_plan(self) -> None:
         es_response = self.client.get(

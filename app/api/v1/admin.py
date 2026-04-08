@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import (
     get_audit_service,
+    get_document_task_queue,
     get_keyword_backend,
     get_policy_engine,
     get_prompt_service,
@@ -26,6 +27,7 @@ from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import PolicyDefinition
 from app.domain.risk.services import PolicyEngine
 from app.infrastructure.cache.redis_client import RedisClient
+from app.infrastructure.queue.worker import DocumentIngestionTaskQueue
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
@@ -189,3 +191,13 @@ def get_cache_health(
         "reachable": redis_client.ping(),
         "mode": redis_client.mode,
     }
+
+
+@router.get("/queue/document-ingestion/health")
+def get_document_ingestion_queue_health(
+    _: UserContext = Depends(require_admin),
+    task_queue: DocumentIngestionTaskQueue = Depends(get_document_task_queue),
+) -> dict:
+    """Return document-ingestion queue reachability and queue-depth information."""
+
+    return task_queue.health()

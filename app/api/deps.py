@@ -18,6 +18,7 @@ from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.db.repositories.postgres import PostgresRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 from app.infrastructure.llm.openai_client import OpenAIClient
+from app.infrastructure.queue.worker import DocumentIngestionTaskQueue, DocumentIngestionWorker
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
@@ -125,6 +126,27 @@ def get_document_ingestion_orchestrator() -> DocumentIngestionOrchestrator:
         repository=get_repository(),
         indexing_service=get_indexing_service(),
         source_store=get_document_source_store(),
+    )
+
+
+@lru_cache
+def get_document_task_queue() -> DocumentIngestionTaskQueue:
+    """Return the document ingestion task queue used by upload and retry endpoints."""
+
+    return DocumentIngestionTaskQueue(
+        redis_client=get_redis_client(),
+        queue_name=settings.document_ingestion_queue_name,
+    )
+
+
+@lru_cache
+def get_document_ingestion_worker() -> DocumentIngestionWorker:
+    """Return the dedicated ingestion worker wiring used by local scripts and tests."""
+
+    return DocumentIngestionWorker(
+        task_queue=get_document_task_queue(),
+        orchestrator=get_document_ingestion_orchestrator(),
+        poll_seconds=settings.document_ingestion_worker_poll_seconds,
     )
 
 

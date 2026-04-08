@@ -35,7 +35,7 @@ class DocumentService:
         self.ingestion_orchestrator = ingestion_orchestrator
 
     def upload_document(self, payload: DocumentUploadRequest, user: UserContext) -> DocumentRecord:
-        """Register one text upload and optionally process it inline."""
+        """Register one text upload and persist the staged source for later ingestion."""
 
         return self._register_document(
             payload=payload,
@@ -51,7 +51,7 @@ class DocumentService:
         file_bytes: bytes,
         process_async: bool = False,
     ) -> DocumentRecord:
-        """Register one file upload and optionally process it outside the request path."""
+        """Register one file upload and persist the staged source for later ingestion."""
 
         return self._register_document(
             payload=payload,
@@ -67,7 +67,7 @@ class DocumentService:
         source_bytes: bytes,
         process_async: bool,
     ) -> DocumentRecord:
-        """Create a pending document version, stage its source bytes and optionally process it immediately."""
+        """Create a pending document version and stage its source bytes for the ingestion worker."""
 
         normalized_source_bytes = source_bytes if source_bytes else payload.content.strip().encode("utf-8")
         content_hash = hashlib.sha256(normalized_source_bytes).hexdigest()
@@ -103,9 +103,7 @@ class DocumentService:
             self.source_store.save_source(document.id, document.source_type, normalized_source_bytes)
 
         self.repository.save_document(document, [], [])
-        if process_async or not self.ingestion_orchestrator:
-            return document
-        return self.ingestion_orchestrator.process_document(document.id)
+        return document
 
     def list_documents(self, user: UserContext) -> list[DocumentRecord]:
         """List current documents visible under the caller's tenant and permission scope."""

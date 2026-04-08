@@ -32,9 +32,11 @@ class RedisIntegrationTest(unittest.TestCase):
         from app.api.deps import (
             get_audit_service,
             get_chat_service,
+            get_document_ingestion_worker,
             get_document_service,
             get_document_ingestion_orchestrator,
             get_document_source_store,
+            get_document_task_queue,
             get_indexing_service,
             get_keyword_backend,
             get_openai_client,
@@ -56,11 +58,13 @@ class RedisIntegrationTest(unittest.TestCase):
             get_session_cache,
             get_retrieval_cache,
             get_rate_limit_service,
+            get_document_task_queue,
             get_keyword_backend,
             get_vector_backend,
             get_document_source_store,
             get_indexing_service,
             get_document_ingestion_orchestrator,
+            get_document_ingestion_worker,
             get_document_service,
             get_prompt_service,
             get_policy_engine,
@@ -85,6 +89,7 @@ class RedisIntegrationTest(unittest.TestCase):
         cls.get_redis_client = staticmethod(get_redis_client)
         cls.get_retrieval_cache = staticmethod(get_retrieval_cache)
         cls.get_session_cache = staticmethod(get_session_cache)
+        cls.get_document_task_queue = staticmethod(get_document_task_queue)
 
     def test_admin_cache_health_and_runtime_cache_keys(self) -> None:
         health = self.client.get(
@@ -134,6 +139,28 @@ class RedisIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(cached_results)
         self.assertGreaterEqual(len(cached_results), 1)
         self.assertTrue(self.get_redis_client().ping())
+
+    def test_document_ingestion_queue_uses_real_redis(self) -> None:
+        health = self.client.get(
+            "/api/v1/admin/queue/document-ingestion/health",
+            headers={
+                **self.headers,
+                "X-Role": "admin",
+            },
+        )
+        self.assertEqual(health.status_code, 200)
+        payload = health.json()
+        self.assertTrue(payload["execute_enabled"])
+        self.assertTrue(payload["reachable"])
+
+        queue = self.get_document_task_queue()
+        receipt = queue.enqueue_document("doc_queue_1")
+        self.assertEqual(receipt["status"], "queued")
+        self.assertGreaterEqual(queue.queue_depth(), 1)
+
+        task = queue.dequeue_document(timeout_seconds=1)
+        self.assertIsNotNone(task)
+        self.assertEqual(task["doc_id"], "doc_queue_1")
 
 
 if __name__ == "__main__":

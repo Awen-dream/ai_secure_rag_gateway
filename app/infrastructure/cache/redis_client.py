@@ -16,6 +16,7 @@ class RedisClient:
 
     _local_lock = threading.Lock()
     _local_store: dict[str, tuple[str, Optional[float]]] = {}
+    _local_queues: dict[str, list[str]] = {}
 
     def __init__(self, mode: str = "local-fallback", url: str | None = None) -> None:
         self.mode = mode
@@ -77,6 +78,54 @@ class RedisClient:
             new_value = int(current_value) + 1
             self._local_store[key] = (str(new_value), now + ttl_seconds)
             return new_value
+
+    def enqueue_json(self, key: str, value: Any) -> int:
+        """Append one JSON payload to a FIFO queue stored in Redis or the local fallback."""
+
+        raw = json.dumps(value, ensure_ascii=False)
+        if self.can_execute():
+            return int(self._client.rpush(key, raw))
+
+        with self._local_lock:
+            queue = self._local_queues.setdefault(key, [])
+            queue.append(raw)
+            return len(queue)
+
+    def dequeue_json(self, key: str, timeout_seconds: float = 0.0) -> Any:
+        """Pop one JSON payload from a FIFO queue, optionally waiting up to the provided timeout."""
+
+        if self.can_execute():
+            if timeout_seconds and timeout_seconds > 0:
+                result = self._client.blpop(key, timeout=int(timeout_seconds))
+                if not result:
+                    return None
+                _, raw = result
+                return json.loads(raw)
+
+            raw = self._client.lpop(key)
+            return json.loads(raw) if raw else None
+
+        deadline = time.time() + max(timeout_seconds, 0.0)
+        while True:
+            with self._local_lock:
+                queue = self._local_queues.get(key, [])
+                if queue:
+                    raw = queue.pop(0)
+                    return json.loads(raw)
+            if timeout_seconds <= 0:
+                return None
+            if time.time() >= deadline:
+                return None
+            time.sleep(min(0.05, timeout_seconds))
+
+    def get_queue_length(self, key: str) -> int:
+        """Return the current queue depth for one Redis-backed or local-fallback FIFO queue."""
+
+        if self.can_execute():
+            return int(self._client.llen(key))
+
+        with self._local_lock:
+            return len(self._local_queues.get(key, []))
 
     def _get_value(self, key: str) -> Optional[str]:
         if self.can_execute():

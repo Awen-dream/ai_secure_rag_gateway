@@ -18,6 +18,8 @@ class AppSettings(BaseModel):
     retrieval_cache_ttl_seconds: int = int(os.getenv("APP_RETRIEVAL_CACHE_TTL_SECONDS", "300"))
     rate_limit_window_seconds: int = int(os.getenv("APP_RATE_LIMIT_WINDOW_SECONDS", "60"))
     rate_limit_max_requests: int = int(os.getenv("APP_RATE_LIMIT_MAX_REQUESTS", "30"))
+    document_ingestion_queue_name: str = os.getenv("APP_DOCUMENT_INGESTION_QUEUE_NAME", "queue:document_ingestion")
+    document_ingestion_worker_poll_seconds: float = float(os.getenv("APP_DOCUMENT_INGESTION_WORKER_POLL_SECONDS", "1.0"))
     elasticsearch_index: str = os.getenv("APP_ELASTICSEARCH_INDEX", "knowledge_chunks")
     elasticsearch_mode: str = os.getenv("APP_ELASTICSEARCH_MODE", "local-fallback")
     elasticsearch_endpoint: Optional[str] = os.getenv("APP_ELASTICSEARCH_ENDPOINT")

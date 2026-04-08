@@ -12,6 +12,7 @@
 
 ```bash
 uvicorn app.main:app --reload
+make run-ingestion-worker
 ```
 
 ## PGVector + Elasticsearch 联调
@@ -36,6 +37,7 @@ make install
 make test-unit
 make test-integration
 make test-all
+make run-ingestion-worker
 ```
 
 ## Chunking 默认值
@@ -86,6 +88,19 @@ make test-all
 - `APP_RATE_LIMIT_WINDOW_SECONDS`
 - `APP_RATE_LIMIT_MAX_REQUESTS`
 
+## 文档异步任务流
+
+当前文档上传已支持真实异步任务流：
+
+- API 负责写入文档元数据、暂存原始文件并把 `doc_id` 入队
+- ingestion worker 独立消费队列，执行解析、切分、embedding、索引
+
+相关环境变量：
+
+- `APP_DOCUMENT_STAGING_DIR`
+- `APP_DOCUMENT_INGESTION_QUEUE_NAME`
+- `APP_DOCUMENT_INGESTION_WORKER_POLL_SECONDS`
+
 快速查看某段文本在当前 tokenizer 下的 token 数和 chunk 分布：
 
 ```bash
@@ -124,6 +139,7 @@ scripts/
 - `GET /api/v1/admin/retrieval/backends`
 - `GET /api/v1/admin/retrieval/backends/{backend}/health`
 - `GET /api/v1/admin/cache/health`
+- `GET /api/v1/admin/queue/document-ingestion/health`
 - `POST /api/v1/admin/retrieval/explain`
 - `GET /api/v1/admin/retrieval/backends/{backend}/plan`
 - `POST /api/v1/admin/retrieval/backends/elasticsearch/init-index`
@@ -202,7 +218,8 @@ scripts/
 - DOCX `word/document.xml` 文本抽取
 - 本地 staging source store，支持把原始上传文件与文本暂存到 `APP_DOCUMENT_STAGING_DIR`
 - 文档状态机：`pending -> parsing -> chunking -> embedding -> indexing -> success/failed`
-- `async_mode` 后台入库，可通过 `retry` 入口重试失败文档
+- `async_mode` 时只负责入队，真实解析/切分/索引由独立 ingestion worker 消费 `APP_DOCUMENT_INGESTION_QUEUE_NAME`
+- 可通过 `retry` 入口重试失败文档
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 

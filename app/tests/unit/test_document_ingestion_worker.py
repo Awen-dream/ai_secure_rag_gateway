@@ -21,14 +21,18 @@ def build_docx_bytes(*paragraphs: str) -> bytes:
     return buffer.getvalue()
 
 
-class DocsFileUploadTest(unittest.TestCase):
+class DocumentIngestionWorkerTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.db_path = "/tmp/secure_rag_gateway_docs_file_upload.db"
+        self.db_path = "/tmp/secure_rag_gateway_ingestion_worker.db"
+        self.staging_dir = "/tmp/secure_rag_gateway_ingestion_worker_staging"
         Path(self.db_path).unlink(missing_ok=True)
+        Path(self.staging_dir).mkdir(parents=True, exist_ok=True)
 
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["APP_REDIS_MODE"] = "local-fallback"
+        os.environ["APP_DOCUMENT_STAGING_DIR"] = self.staging_dir
+        os.environ["APP_DOCUMENT_INGESTION_QUEUE_NAME"] = "queue:test_document_ingestion_worker"
         os.environ["OPENAI_API_KEY"] = ""
 
         from app.core.config import settings
@@ -36,14 +40,16 @@ class DocsFileUploadTest(unittest.TestCase):
         settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
         settings.redis_mode = "local-fallback"
+        settings.document_staging_dir = self.staging_dir
+        settings.document_ingestion_queue_name = "queue:test_document_ingestion_worker"
         settings.openai_api_key = None
 
         from app.api.deps import (
             get_audit_service,
             get_chat_service,
+            get_document_ingestion_orchestrator,
             get_document_ingestion_worker,
             get_document_service,
-            get_document_ingestion_orchestrator,
             get_document_source_store,
             get_document_task_queue,
             get_indexing_service,
@@ -95,58 +101,55 @@ class DocsFileUploadTest(unittest.TestCase):
             "X-Role": "employee",
             "X-Clearance-Level": "2",
         }
+        self.get_document_ingestion_worker = get_document_ingestion_worker
 
-    def test_upload_html_file_extracts_text_before_indexing(self) -> None:
-        response = self.client.post(
+    def tearDown(self) -> None:
+        Path(self.db_path).unlink(missing_ok=True)
+        for child in Path(self.staging_dir).glob("*"):
+            child.unlink(missing_ok=True)
+        Path(self.staging_dir).rmdir()
+
+    def test_async_upload_queues_work_until_worker_processes_document(self) -> None:
+        upload = self.client.post(
             "/api/v1/docs/upload-file",
             files={
                 "file": (
-                    "policy.html",
-                    "<h1>报销制度</h1><p>审批时限为3个工作日。</p>".encode("utf-8"),
-                    "text/html",
+                    "policy.docx",
+                    build_docx_bytes("报销制度", "审批时限为3个工作日。"),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
             },
-            data={"security_level": "1", "department_scope": "engineering"},
+            data={"security_level": "1", "department_scope": "engineering", "async_mode": "true"},
             headers=self.headers,
         )
 
-        self.assertEqual(response.status_code, 200)
-        document = response.json()
-        self.assertEqual(document["source_type"], "html")
+        self.assertEqual(upload.status_code, 200)
+        document = upload.json()
+        self.assertEqual(document["status"], "pending")
 
-        detail = self.client.post(
+        immediate = self.client.post(
             "/api/v1/chat/query",
             json={"query": "报销审批时限是什么？"},
             headers=self.headers,
         )
-        self.assertEqual(detail.status_code, 200)
-        self.assertIn("审批时限为3个工作日", detail.json()["answer"])
+        self.assertEqual(immediate.status_code, 200)
+        self.assertIn("无法确认", immediate.json()["answer"])
 
-    def test_upload_docx_file_extracts_text_before_indexing(self) -> None:
-        response = self.client.post(
-            "/api/v1/docs/upload-file",
-            files={
-                "file": (
-                    "flow.docx",
-                    build_docx_bytes("采购流程", "审批时限为2个工作日。"),
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-            },
-            data={"security_level": "1", "department_scope": "engineering"},
-            headers=self.headers,
-        )
+        processed = self.get_document_ingestion_worker().process_once()
+        self.assertIsNotNone(processed)
+        self.assertEqual(processed["status"], "success")
 
-        self.assertEqual(response.status_code, 200)
-        document = response.json()
-        self.assertEqual(document["source_type"], "docx")
+        refreshed = self.client.get(f"/api/v1/docs/{document['id']}", headers=self.headers)
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertEqual(refreshed.json()["status"], "success")
 
-        detail = self.client.post(
+        queried = self.client.post(
             "/api/v1/chat/query",
-            json={"query": "采购审批时限是什么？"},
+            json={"query": "报销审批时限是什么？"},
             headers=self.headers,
         )
-        self.assertEqual(detail.status_code, 200)
-        self.assertIn("审批时限为2个工作日", detail.json()["answer"])
+        self.assertEqual(queried.status_code, 200)
+        self.assertIn("审批时限为3个工作日", queried.json()["answer"])
 
 
 if __name__ == "__main__":

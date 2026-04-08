@@ -5,6 +5,7 @@ UNIT_TESTS = \
 	app.tests.unit.test_access_filter \
 	app.tests.unit.test_document_parser \
 	app.tests.unit.test_document_ingestion_orchestrator \
+	app.tests.unit.test_document_ingestion_worker \
 	app.tests.unit.test_docs_file_upload \
 	app.tests.unit.test_ingestion_pipelines \
 	app.tests.unit.test_import \
@@ -23,13 +24,16 @@ INTEGRATION_TESTS = \
 	app.tests.integration.test_postgres_metadata_repository_integration \
 	app.tests.integration.test_redis_integration
 
-.PHONY: install run test-unit test-integration test-all integration-up integration-down compile
+.PHONY: install run run-ingestion-worker test-unit test-integration test-all integration-up integration-down compile
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
 
 run:
 	$(PYTHON) -m uvicorn app.main:app --reload
+
+run-ingestion-worker:
+	$(PYTHON) scripts/run_document_ingestion_worker.py
 
 compile:
 	PYTHONPYCACHEPREFIX=/tmp/pycache $(PYTHON) -m py_compile $$(find app -name '*.py' -print) main.py

@@ -9,6 +9,7 @@ from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentS
 from app.domain.retrieval.models import RetrievalResult
 from app.domain.risk.rate_limit import RateLimitService
 from app.infrastructure.cache.redis_client import RedisClient
+from app.infrastructure.queue.worker import DocumentIngestionTaskQueue
 
 
 def build_user() -> UserContext:
@@ -101,6 +102,19 @@ class CacheServicesTest(unittest.TestCase):
         self.assertEqual(service.check_user("u-limit"), (True, 1))
         self.assertEqual(service.check_user("u-limit"), (True, 2))
         self.assertEqual(service.check_user("u-limit"), (False, 3))
+
+    def test_document_ingestion_queue_round_trip_with_local_fallback(self) -> None:
+        queue = DocumentIngestionTaskQueue(redis_client=RedisClient(), queue_name="queue:test_document_ingestion")
+
+        receipt = queue.enqueue_document("doc_1")
+        self.assertEqual(receipt["doc_id"], "doc_1")
+        self.assertEqual(receipt["status"], "queued")
+        self.assertEqual(queue.queue_depth(), 1)
+
+        task = queue.dequeue_document()
+        self.assertIsNotNone(task)
+        self.assertEqual(task["doc_id"], "doc_1")
+        self.assertEqual(queue.queue_depth(), 0)
 
 
 if __name__ == "__main__":

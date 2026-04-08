@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.application.ingestion.document_parser import infer_source_type, normalize_text_content
-from app.api.deps import get_document_ingestion_orchestrator, get_document_service
+from app.api.deps import get_document_ingestion_orchestrator, get_document_service, get_document_task_queue
 from app.core.security import get_current_user
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.auth.models import UserContext
 from app.domain.documents.models import DocumentRecord
 from app.domain.documents.schemas import DocumentUploadRequest
 from app.domain.documents.services import DocumentService
+from app.infrastructure.queue.worker import DocumentIngestionTaskQueue
 
 router = APIRouter()
 
@@ -25,10 +26,10 @@ def _parse_csv_field(value: Optional[str], default: list[str] | None = None) -> 
 @router.post("/upload", response_model=DocumentRecord)
 def upload_document(
     payload: DocumentUploadRequest,
-    background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user),
     service: DocumentService = Depends(get_document_service),
     orchestrator: DocumentIngestionOrchestrator = Depends(get_document_ingestion_orchestrator),
+    task_queue: DocumentIngestionTaskQueue = Depends(get_document_task_queue),
 ) -> DocumentRecord:
     normalized_payload = payload.model_copy(
         update={
@@ -38,13 +39,14 @@ def upload_document(
     )
     document = service.upload_document(normalized_payload, user)
     if normalized_payload.async_mode:
-        background_tasks.add_task(orchestrator.process_document, document.id)
+        task_queue.enqueue_document(document.id)
+    else:
+        document = orchestrator.process_document(document.id)
     return document
 
 
 @router.post("/upload-file", response_model=DocumentRecord)
 async def upload_document_file(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: Optional[str] = Form(default=None),
     source_type: Optional[str] = Form(default=None),
@@ -58,6 +60,7 @@ async def upload_document_file(
     user: UserContext = Depends(get_current_user),
     service: DocumentService = Depends(get_document_service),
     orchestrator: DocumentIngestionOrchestrator = Depends(get_document_ingestion_orchestrator),
+    task_queue: DocumentIngestionTaskQueue = Depends(get_document_task_queue),
 ) -> DocumentRecord:
     try:
         file_bytes = await file.read()
@@ -79,7 +82,9 @@ async def upload_document_file(
     )
     document = service.upload_document_file(payload, user, file_bytes=file_bytes, process_async=async_mode)
     if async_mode:
-        background_tasks.add_task(orchestrator.process_document, document.id)
+        task_queue.enqueue_document(document.id)
+    else:
+        document = orchestrator.process_document(document.id)
     return document
 
 
@@ -122,14 +127,13 @@ def reindex_document(
 @router.post("/{doc_id}/retry", response_model=DocumentRecord)
 def retry_document(
     doc_id: str,
-    background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user),
     service: DocumentService = Depends(get_document_service),
-    orchestrator: DocumentIngestionOrchestrator = Depends(get_document_ingestion_orchestrator),
+    task_queue: DocumentIngestionTaskQueue = Depends(get_document_task_queue),
 ) -> DocumentRecord:
     try:
         document = service.retry_document(doc_id, user)
-        background_tasks.add_task(orchestrator.process_document, document.id)
+        task_queue.enqueue_document(document.id)
         return document
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.") from exc

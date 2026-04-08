@@ -27,12 +27,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m unittest \
-            app.tests.unit.test_ingestion_pipelines \
-            app.tests.unit.test_import \
-            app.tests.unit.test_hybrid_retrieval \
-            app.tests.unit.test_retrieval_backends \
-            app.tests.unit.test_admin_retrieval_endpoints
+          make test-unit
 
   integration-tests:
     runs-on: ubuntu-latest
