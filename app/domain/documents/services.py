@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Optional
 
 from app.application.ingestion.pipelines import chunk_document
+from app.domain.auth.filter_builder import build_access_filter
 from app.domain.auth.models import UserContext
-from app.domain.auth.policies import can_access_department
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.documents.schemas import DocumentUploadRequest
 from app.domain.retrieval.indexing import RetrievalIndexingService
@@ -93,10 +93,11 @@ class DocumentService:
     def list_documents(self, user: UserContext) -> list[DocumentRecord]:
         """List current documents visible under the caller's tenant and permission scope."""
 
+        access_filter = build_access_filter(user)
         return [
             document
             for document in self.repository.list_documents(user.tenant_id)
-            if document.tenant_id == user.tenant_id and self._has_document_access(document, user)
+            if access_filter.allows_document(document)
         ]
 
     def reindex_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
@@ -117,7 +118,7 @@ class DocumentService:
         document = self.repository.get_document(doc_id)
         if not document or document.tenant_id != user.tenant_id:
             raise KeyError(doc_id)
-        if not self._has_document_access(document, user):
+        if not build_access_filter(user).allows_document(document):
             raise PermissionError(doc_id)
         return document
 
@@ -125,28 +126,14 @@ class DocumentService:
         """Return only those chunks that are allowed to participate in retrieval."""
 
         results: list[tuple[DocumentRecord, DocumentChunk]] = []
+        access_filter = build_access_filter(user)
         documents = {document.id: document for document in self.repository.list_documents(user.tenant_id)}
         for chunk in self.repository.list_chunks_for_tenant(user.tenant_id):
             document = documents.get(chunk.doc_id)
             if not document:
                 continue
-            if document.tenant_id != user.tenant_id or not self._has_document_access(document, user):
+            if not access_filter.allows_document(document):
                 continue
-            if self._has_chunk_access(chunk, user):
+            if access_filter.allows_chunk(chunk):
                 results.append((document, chunk))
         return results
-
-    @staticmethod
-    def _has_document_access(document: DocumentRecord, user: UserContext) -> bool:
-        return (
-            document.current
-            and user.clearance_level >= document.security_level
-            and can_access_department(document.department_scope, user)
-        )
-
-    @staticmethod
-    def _has_chunk_access(chunk: DocumentChunk, user: UserContext) -> bool:
-        role_ok = not chunk.role_scope or user.role in chunk.role_scope
-        return role_ok and user.clearance_level >= chunk.security_level and can_access_department(
-            chunk.department_scope, user
-        )

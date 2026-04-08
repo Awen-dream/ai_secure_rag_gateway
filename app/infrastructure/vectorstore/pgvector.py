@@ -5,6 +5,7 @@ import math
 from hashlib import sha256
 from typing import Sequence
 
+from app.domain.auth.filter_builder import AccessFilter
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.retrieval.backends import BackendSearchHit
 from app.domain.retrieval.models import RetrievalBackendHealth, RetrievalBackendInfo
@@ -45,12 +46,13 @@ class PGVectorStore:
         query: str,
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
+        access_filter: AccessFilter | None = None,
     ) -> list[BackendSearchHit]:
         """Return semantic hits scored with a lightweight local similarity fallback."""
 
         if self.can_execute() and candidates:
             try:
-                return self._execute_search(query, candidates, top_k)
+                return self._execute_search(query, candidates, top_k, access_filter)
             except Exception:
                 pass
 
@@ -153,11 +155,15 @@ CREATE TABLE IF NOT EXISTS {self.table_name} (
     doc_id TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
     title TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
     section_name TEXT NOT NULL,
     content TEXT NOT NULL,
     department_scope JSONB NOT NULL,
+    visibility_scope JSONB NOT NULL,
     role_scope JSONB NOT NULL,
     security_level INTEGER NOT NULL,
+    current BOOLEAN NOT NULL,
+    status TEXT NOT NULL,
     metadata_json JSONB NOT NULL,
     embedding VECTOR({self.embedding_dimension}) NOT NULL
 );
@@ -173,21 +179,25 @@ ON {self.table_name} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1
 
         return f"""
 INSERT INTO {self.table_name} (
-    chunk_id, doc_id, tenant_id, title, section_name, content,
-    department_scope, role_scope, security_level, metadata_json, embedding
+    chunk_id, doc_id, tenant_id, title, owner_id, section_name, content,
+    department_scope, visibility_scope, role_scope, security_level, current, status, metadata_json, embedding
 ) VALUES (
-    %(chunk_id)s, %(doc_id)s, %(tenant_id)s, %(title)s, %(section_name)s, %(content)s,
-    %(department_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(metadata_json)s::jsonb, %(embedding)s::vector
+    %(chunk_id)s, %(doc_id)s, %(tenant_id)s, %(title)s, %(owner_id)s, %(section_name)s, %(content)s,
+    %(department_scope)s::jsonb, %(visibility_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(current)s, %(status)s, %(metadata_json)s::jsonb, %(embedding)s::vector
 )
 ON CONFLICT (chunk_id) DO UPDATE SET
     doc_id = EXCLUDED.doc_id,
     tenant_id = EXCLUDED.tenant_id,
     title = EXCLUDED.title,
+    owner_id = EXCLUDED.owner_id,
     section_name = EXCLUDED.section_name,
     content = EXCLUDED.content,
     department_scope = EXCLUDED.department_scope,
+    visibility_scope = EXCLUDED.visibility_scope,
     role_scope = EXCLUDED.role_scope,
     security_level = EXCLUDED.security_level,
+    current = EXCLUDED.current,
+    status = EXCLUDED.status,
     metadata_json = EXCLUDED.metadata_json,
     embedding = EXCLUDED.embedding;
 """.strip()
@@ -201,18 +211,22 @@ ON CONFLICT (chunk_id) DO UPDATE SET
                 "doc_id": document.id,
                 "tenant_id": document.tenant_id,
                 "title": document.title,
+                "owner_id": document.owner_id,
                 "section_name": chunk.section_name,
                 "content": chunk.text,
                 "department_scope": json.dumps(chunk.department_scope, ensure_ascii=False),
+                "visibility_scope": json.dumps(document.visibility_scope, ensure_ascii=False),
                 "role_scope": json.dumps(chunk.role_scope, ensure_ascii=False),
                 "security_level": chunk.security_level,
+                "current": document.current,
+                "status": document.status.value,
                 "metadata_json": json.dumps(chunk.metadata_json, ensure_ascii=False),
                 "embedding": self._to_pgvector_literal(self._embed_text(chunk.text)),
             }
             for chunk in chunks
         ]
 
-    def build_search_sql(self, tenant_id: str, top_k: int) -> str:
+    def build_search_sql(self, access_filter: AccessFilter, top_k: int) -> str:
         """Return the SQL template for permission-aware pgvector search."""
 
         return f"""
@@ -221,16 +235,19 @@ SELECT
     doc_id,
     tenant_id,
     title,
+    owner_id,
     section_name,
     content,
     department_scope,
+    visibility_scope,
     role_scope,
     security_level,
+    current,
+    status,
     metadata_json,
     1 - (embedding <=> %(query_embedding)s::vector) AS similarity_score
 FROM {self.table_name}
-WHERE tenant_id = %(tenant_id)s
-  AND chunk_id = ANY(%(chunk_ids)s::text[])
+WHERE {access_filter.build_pgvector_where_clause()}
 ORDER BY embedding <=> %(query_embedding)s
 LIMIT {top_k};
 """.strip()
@@ -250,20 +267,19 @@ LIMIT {top_k};
         query: str,
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
+        access_filter: AccessFilter | None,
     ) -> list[BackendSearchHit]:
         """Execute a real pgvector similarity query and map results back to allowed candidates."""
 
         if not self.can_execute():
             return []
+        if access_filter is None:
+            raise RuntimeError("Access filter is required for remote pgvector search.")
 
         candidate_lookup = {chunk.id: (document, chunk) for document, chunk in candidates}
-        tenant_id = candidates[0][0].tenant_id
-        sql = self.build_search_sql(tenant_id, top_k)
-        params = {
-            "tenant_id": tenant_id,
-            "query_embedding": self._to_pgvector_literal(self._embed_text(query)),
-            "chunk_ids": list(candidate_lookup.keys()),
-        }
+        sql = self.build_search_sql(access_filter, top_k)
+        params = access_filter.build_pgvector_params(list(candidate_lookup.keys()))
+        params["query_embedding"] = self._to_pgvector_literal(self._embed_text(query))
         hits: list[BackendSearchHit] = []
         with psycopg.connect(self.dsn) as connection:
             with connection.cursor() as cursor:

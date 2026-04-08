@@ -9,6 +9,7 @@ from app.api.deps import (
     get_retrieval_service,
     get_vector_backend,
 )
+from app.domain.auth.filter_builder import build_access_filter
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
@@ -107,14 +108,16 @@ def get_retrieval_backend_plan(
 
     if backend == "elasticsearch":
         terms = query.split()
+        access_filter = build_access_filter(user)
         return RetrievalBackendPlan(
             backend="elasticsearch",
             execute_enabled=keyword_backend.can_execute(),
             artifacts={
+                "access_filter": access_filter.model_dump(),
                 "mapping": keyword_backend.build_index_mapping(),
                 "search_body": keyword_backend.build_search_body(
                     query=query,
-                    tenant_id=user.tenant_id,
+                    access_filter=access_filter,
                     terms=terms,
                     top_k=top_k,
                 ),
@@ -122,13 +125,15 @@ def get_retrieval_backend_plan(
         )
 
     if backend == "pgvector":
+        access_filter = build_access_filter(user)
         return RetrievalBackendPlan(
             backend="pgvector",
             execute_enabled=vector_backend.can_execute(),
             artifacts={
+                "access_filter": access_filter.model_dump(),
                 "ddl": vector_backend.build_table_ddl(),
                 "upsert_sql": vector_backend.build_upsert_sql(),
-                "search_sql": vector_backend.build_search_sql(user.tenant_id, top_k),
+                "search_sql": vector_backend.build_search_sql(access_filter, top_k),
             },
         )
 

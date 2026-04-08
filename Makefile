@@ -2,6 +2,7 @@ PYTHON ?= python
 COMPOSE_FILE ?= docker-compose.integration.yml
 
 UNIT_TESTS = \
+	app.tests.unit.test_access_filter \
 	app.tests.unit.test_ingestion_pipelines \
 	app.tests.unit.test_import \
 	app.tests.unit.test_hybrid_retrieval \

@@ -4,6 +4,7 @@ import json
 from urllib import error, request
 from typing import Sequence
 
+from app.domain.auth.filter_builder import AccessFilter
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.retrieval.backends import BackendSearchHit
 from app.domain.retrieval.models import RetrievalBackendHealth, RetrievalBackendInfo
@@ -39,12 +40,13 @@ class ElasticsearchSearch:
         terms: Sequence[str],
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
+        access_filter: AccessFilter | None = None,
     ) -> list[BackendSearchHit]:
         """Return keyword-oriented hits using title and body term matching."""
 
         if self.can_execute() and candidates:
             try:
-                return self._remote_search(query, terms, candidates, top_k)
+                return self._remote_search(query, terms, candidates, top_k, access_filter)
             except Exception:
                 pass
 
@@ -178,11 +180,15 @@ class ElasticsearchSearch:
                     "doc_id": {"type": "keyword"},
                     "tenant_id": {"type": "keyword"},
                     "title": {"type": "text"},
+                    "owner_id": {"type": "keyword"},
                     "section_name": {"type": "text"},
                     "content": {"type": "text"},
                     "department_scope": {"type": "keyword"},
+                    "visibility_scope": {"type": "keyword"},
                     "role_scope": {"type": "keyword"},
                     "security_level": {"type": "integer"},
+                    "current": {"type": "boolean"},
+                    "status": {"type": "keyword"},
                     "metadata_json": {"type": "object", "enabled": True},
                 }
             },
@@ -201,11 +207,15 @@ class ElasticsearchSearch:
                         "doc_id": document.id,
                         "tenant_id": document.tenant_id,
                         "title": document.title,
+                        "owner_id": document.owner_id,
                         "section_name": chunk.section_name,
                         "content": chunk.text,
                         "department_scope": chunk.department_scope,
+                        "visibility_scope": document.visibility_scope,
                         "role_scope": chunk.role_scope,
                         "security_level": chunk.security_level,
+                        "current": document.current,
+                        "status": document.status.value,
                         "metadata_json": chunk.metadata_json,
                     },
                     ensure_ascii=False,
@@ -216,7 +226,7 @@ class ElasticsearchSearch:
     def build_search_body(
         self,
         query: str,
-        tenant_id: str,
+        access_filter: AccessFilter,
         terms: Sequence[str],
         top_k: int,
         allowed_chunk_ids: Sequence[str] | None = None,
@@ -230,15 +240,11 @@ class ElasticsearchSearch:
         for term in terms[:8]:
             should_clauses.append({"term": {"title": {"value": term, "boost": 2}}})
 
-        filters = [{"term": {"tenant_id": tenant_id}}]
-        if allowed_chunk_ids:
-            filters.append({"terms": {"chunk_id": list(allowed_chunk_ids)}})
-
         return {
             "size": top_k,
             "query": {
                 "bool": {
-                    "filter": filters,
+                    "filter": access_filter.build_elasticsearch_filters(list(allowed_chunk_ids or [])),
                     "should": should_clauses,
                     "minimum_should_match": 1,
                 }
@@ -251,14 +257,16 @@ class ElasticsearchSearch:
         terms: Sequence[str],
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
+        access_filter: AccessFilter | None,
     ) -> list[BackendSearchHit]:
         """Execute a real Elasticsearch search and map results back to permission-filtered candidates."""
 
         candidate_lookup = {chunk.id: (document, chunk) for document, chunk in candidates}
-        tenant_id = candidates[0][0].tenant_id
+        if access_filter is None:
+            raise RuntimeError("Access filter is required for remote Elasticsearch search.")
         body = self.build_search_body(
             query=query,
-            tenant_id=tenant_id,
+            access_filter=access_filter,
             terms=terms,
             top_k=top_k,
             allowed_chunk_ids=list(candidate_lookup.keys()),

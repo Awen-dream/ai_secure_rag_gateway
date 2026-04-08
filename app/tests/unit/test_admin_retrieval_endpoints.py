@@ -95,6 +95,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(es_response.status_code, 200)
         es_payload = es_response.json()
         self.assertEqual(es_payload["backend"], "elasticsearch")
+        self.assertIn("access_filter", es_payload["artifacts"])
         self.assertIn("mapping", es_payload["artifacts"])
         self.assertIn("search_body", es_payload["artifacts"])
 
@@ -106,6 +107,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(pg_response.status_code, 200)
         pg_payload = pg_response.json()
         self.assertEqual(pg_payload["backend"], "pgvector")
+        self.assertIn("access_filter", pg_payload["artifacts"])
         self.assertIn("ddl", pg_payload["artifacts"])
         self.assertIn("upsert_sql", pg_payload["artifacts"])
         self.assertIn("search_sql", pg_payload["artifacts"])

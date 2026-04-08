@@ -4,6 +4,7 @@ from typing import Protocol, Sequence
 
 from pydantic import BaseModel, Field
 
+from app.domain.auth.filter_builder import AccessFilter
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 
 
@@ -28,6 +29,7 @@ class KeywordSearchBackend(Protocol):
         terms: Sequence[str],
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
+        access_filter: AccessFilter | None = None,
     ) -> list[BackendSearchHit]:
         """Search keyword evidence from permission-filtered candidates."""
 
@@ -48,6 +50,7 @@ class VectorSearchBackend(Protocol):
         query: str,
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
+        access_filter: AccessFilter | None = None,
     ) -> list[BackendSearchHit]:
         """Search semantic evidence from permission-filtered candidates."""
 

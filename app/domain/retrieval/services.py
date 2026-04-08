@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.application.query.intent import classify_query_intent
 from app.application.query.retrieval_cache import RetrievalCache
 from app.application.query.rewrite import rewrite_query
+from app.domain.auth.filter_builder import build_access_filter
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
 from app.domain.retrieval.backends import BackendSearchHit, KeywordSearchBackend, VectorSearchBackend
@@ -79,9 +80,21 @@ class RetrievalService:
     ) -> list[RetrievalResult]:
         """Fuse Elasticsearch-style keyword hits and PGVector-style semantic hits."""
 
+        access_filter = build_access_filter(user)
         candidates = self.document_service.get_accessible_chunks(user)
-        keyword_hits = self.keyword_backend.search(query=query, terms=terms, candidates=candidates, top_k=profile.candidate_pool)
-        vector_hits = self.vector_backend.search(query=query, candidates=candidates, top_k=profile.candidate_pool)
+        keyword_hits = self.keyword_backend.search(
+            query=query,
+            terms=terms,
+            candidates=candidates,
+            top_k=profile.candidate_pool,
+            access_filter=access_filter,
+        )
+        vector_hits = self.vector_backend.search(
+            query=query,
+            candidates=candidates,
+            top_k=profile.candidate_pool,
+            access_filter=access_filter,
+        )
         ranked_candidates = sort_by_score(self._merge_backend_hits(keyword_hits, vector_hits, profile, terms))
         if not ranked_candidates:
             return []
