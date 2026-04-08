@@ -179,6 +179,8 @@ class SQLiteRepository:
                     run_count INTEGER NOT NULL DEFAULT 0,
                     success_count INTEGER NOT NULL DEFAULT 0,
                     failure_count INTEGER NOT NULL DEFAULT 0,
+                    managed_source_document_ids TEXT NOT NULL DEFAULT '[]',
+                    cycle_seen_source_document_ids TEXT NOT NULL DEFAULT '[]',
                     last_run_id TEXT,
                     last_run_status TEXT,
                     last_run_at TEXT,
@@ -221,6 +223,14 @@ class SQLiteRepository:
                 connection.execute("ALTER TABLE source_sync_jobs ADD COLUMN success_count INTEGER NOT NULL DEFAULT 0")
             if "failure_count" not in existing_sync_job_columns:
                 connection.execute("ALTER TABLE source_sync_jobs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0")
+            if "managed_source_document_ids" not in existing_sync_job_columns:
+                connection.execute(
+                    "ALTER TABLE source_sync_jobs ADD COLUMN managed_source_document_ids TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "cycle_seen_source_document_ids" not in existing_sync_job_columns:
+                connection.execute(
+                    "ALTER TABLE source_sync_jobs ADD COLUMN cycle_seen_source_document_ids TEXT NOT NULL DEFAULT '[]'"
+                )
             existing_session_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(chat_sessions)").fetchall()
             }
@@ -619,8 +629,9 @@ class SQLiteRepository:
                     id, tenant_id, provider, name, created_by, source_root, space_id, parent_node_token, cursor,
                     limit_value, continue_on_error, default_owner_id, default_department_scope, default_visibility_scope,
                     default_security_level, default_tags, default_async_mode, enabled, status, last_error, run_count,
-                    success_count, failure_count, last_run_id, last_run_status, last_run_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    success_count, failure_count, managed_source_document_ids, cycle_seen_source_document_ids,
+                    last_run_id, last_run_status, last_run_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job.id,
@@ -646,6 +657,8 @@ class SQLiteRepository:
                     job.run_count,
                     job.success_count,
                     job.failure_count,
+                    self._dump_json(job.managed_source_document_ids),
+                    self._dump_json(job.cycle_seen_source_document_ids),
                     job.last_run_id,
                     job.last_run_status,
                     job.last_run_at.isoformat() if job.last_run_at else None,
@@ -831,6 +844,8 @@ class SQLiteRepository:
             run_count=row["run_count"],
             success_count=row["success_count"],
             failure_count=row["failure_count"],
+            managed_source_document_ids=self._load_json(row["managed_source_document_ids"]),
+            cycle_seen_source_document_ids=self._load_json(row["cycle_seen_source_document_ids"]),
             last_run_id=row["last_run_id"],
             last_run_status=row["last_run_status"],
             last_run_at=self._to_datetime(row["last_run_at"]) if row["last_run_at"] else None,

@@ -156,6 +156,39 @@ class DocumentService:
             raise RuntimeError("Document ingestion orchestrator is not configured.")
         return self.ingestion_orchestrator.retry_document(document.id)
 
+    def retire_document(self, doc_id: str, user: UserContext, reason: str = "retired by source sync") -> DocumentRecord:
+        """Retire one document version so it no longer participates in reads or retrieval."""
+
+        document = self.get_document(doc_id, user)
+        return self._retire_document_record(document, reason)
+
+    def retire_document_system(self, doc_id: str, reason: str = "retired by source sync") -> DocumentRecord:
+        """Retire one document version without applying user-facing access checks."""
+
+        document = self.repository.get_document(doc_id)
+        if not document:
+            raise KeyError(doc_id)
+        return self._retire_document_record(document, reason)
+
+    def _retire_document_record(self, document: DocumentRecord, reason: str) -> DocumentRecord:
+        """Apply the retirement state transition and cleanup side effects for one document."""
+
+        if not document.current and document.status == DocumentStatus.RETIRED:
+            return document
+
+        chunks = self.repository.list_chunks_for_document(document.id)
+        document.current = False
+        document.status = DocumentStatus.RETIRED
+        document.last_error = reason
+        document.updated_at = utcnow()
+        self.repository.update_document(document)
+
+        if self.indexing_service:
+            self.indexing_service.delete_document(document, chunks)
+        if self.source_store:
+            self.source_store.delete_source(document.id, document.source_type)
+        return document
+
     def get_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
         """Load one document and enforce tenant plus permission boundaries."""
 

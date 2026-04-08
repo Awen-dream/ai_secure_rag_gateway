@@ -15,6 +15,7 @@ class DocumentStatus(str, Enum):
     INDEXING = "indexing"
     SUCCESS = "success"
     FAILED = "failed"
+    RETIRED = "retired"
 
 
 class DocumentRecord(BaseModel):

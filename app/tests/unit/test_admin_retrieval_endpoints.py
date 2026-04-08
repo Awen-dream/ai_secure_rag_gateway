@@ -49,7 +49,7 @@ class _FakeFeishuClient:
             ExternalSourceItem(
                 source=source,
                 source_kind="wiki",
-                external_document_id="wiki_token",
+                external_document_id=source.rstrip("/").split("/")[-1],
                 title=f"Listed {index}",
                 space_id=space_id or "space_1",
                 node_token=source.rstrip("/").split("/")[-1],

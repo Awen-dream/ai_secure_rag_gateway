@@ -24,3 +24,11 @@ class RetrievalIndexingService:
             "keyword": self.keyword_backend.upsert_document(document, chunks),
             "vector": self.vector_backend.upsert_document(document, chunks),
         }
+
+    def delete_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
+        """Remove a document snapshot from both retrieval backends after retirement or deletion."""
+
+        return {
+            "keyword": self.keyword_backend.delete_document(document, chunks),
+            "vector": self.vector_backend.delete_document(document, chunks),
+        }

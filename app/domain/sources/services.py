@@ -103,7 +103,20 @@ class FeishuSourceSyncService:
     ) -> FeishuBatchSyncResponse:
         """Synchronize multiple Feishu sources and return item-level outcomes plus aggregate stats."""
 
-        items_to_sync, listed_count, next_cursor = self._resolve_sync_items(payload)
+        summary, _ = self._sync_sources_internal(payload, user, mode=mode, job_id=job_id)
+        return summary
+
+    def _sync_sources_internal(
+        self,
+        payload: FeishuBatchSyncRequest,
+        user: UserContext,
+        *,
+        mode: str = "manual",
+        job_id: str | None = None,
+    ) -> tuple[FeishuBatchSyncResponse, list[str]]:
+        """Internal sync helper that also returns listed source-document identifiers for reconciliation."""
+
+        items_to_sync, listed_count, next_cursor, listed_source_document_ids = self._resolve_sync_items(payload)
         results: list[FeishuBatchSyncItemResponse] = []
         for item in items_to_sync:
             try:
@@ -179,7 +192,7 @@ class FeishuSourceSyncService:
             )
         )
         summary.run_id = run_id
-        return summary
+        return summary, listed_source_document_ids
 
     def list_sync_runs(self, user: UserContext) -> list[SourceSyncRun]:
         """Return persisted sync runs for the current tenant and connector."""
@@ -221,6 +234,8 @@ class FeishuSourceSyncService:
             run_count=existing.run_count if existing else 0,
             success_count=existing.success_count if existing else 0,
             failure_count=existing.failure_count if existing else 0,
+            managed_source_document_ids=list(existing.managed_source_document_ids) if existing else [],
+            cycle_seen_source_document_ids=list(existing.cycle_seen_source_document_ids) if existing else [],
             last_run_id=existing.last_run_id if existing else None,
             last_run_status=existing.last_run_status if existing else None,
             last_run_at=existing.last_run_at if existing else None,
@@ -247,13 +262,15 @@ class FeishuSourceSyncService:
         if not job.enabled:
             raise ValueError(f"Feishu sync job {job_id} is disabled.")
 
+        if not job.cursor:
+            job.cycle_seen_source_document_ids = []
         job.status = "running"
         job.last_error = None
         job.updated_at = utcnow()
         self.repository.save_source_sync_job(job)
 
         try:
-            summary = self.sync_sources(
+            summary, listed_source_document_ids = self._sync_sources_internal(
                 FeishuBatchSyncRequest(
                     source_root=job.source_root,
                     space_id=job.space_id,
@@ -284,6 +301,9 @@ class FeishuSourceSyncService:
             raise
 
         resolved_status = self._resolve_run_status(summary)
+        merged_cycle_ids = list(
+            dict.fromkeys([*job.cycle_seen_source_document_ids, *[item for item in listed_source_document_ids if item]])
+        )
         job.cursor = summary.next_cursor
         job.status = self._resolve_job_status(job.enabled, resolved_status)
         job.last_error = None if resolved_status != "failed" else "sync job failed"
@@ -294,6 +314,13 @@ class FeishuSourceSyncService:
             job.failure_count += 1
         job.last_run_id = summary.run_id
         job.last_run_status = resolved_status
+        if summary.next_cursor is None:
+            stale_source_ids = sorted(set(job.managed_source_document_ids) - set(merged_cycle_ids))
+            self._retire_missing_documents(user.tenant_id, stale_source_ids)
+            job.managed_source_document_ids = merged_cycle_ids
+            job.cycle_seen_source_document_ids = []
+        else:
+            job.cycle_seen_source_document_ids = merged_cycle_ids
         job.last_run_at = utcnow()
         job.updated_at = job.last_run_at
         self.repository.save_source_sync_job(job)
@@ -368,9 +395,9 @@ class FeishuSourceSyncService:
     def _resolve_sync_items(
         self,
         payload: FeishuBatchSyncRequest,
-    ) -> tuple[list[FeishuImportRequest], int, str | None]:
+    ) -> tuple[list[FeishuImportRequest], int, str | None, list[str]]:
         if payload.items:
-            return list(payload.items), len(payload.items), None
+            return list(payload.items), len(payload.items), None, []
 
         if not payload.source_root and not payload.space_id:
             raise ValueError("Feishu sync listing requires source_root or space_id when items are not provided.")
@@ -382,7 +409,8 @@ class FeishuSourceSyncService:
             parent_node_token=payload.parent_node_token,
         )
         items = [self._build_listed_import_request(item, payload) for item in page.items]
-        return items, len(page.items), page.next_cursor
+        listed_source_document_ids = [item.external_document_id for item in page.items if item.external_document_id]
+        return items, len(page.items), page.next_cursor, listed_source_document_ids
 
     @staticmethod
     def _build_listed_import_request(
@@ -452,3 +480,21 @@ class FeishuSourceSyncService:
         if run_status == "failed":
             return "failed"
         return "idle"
+
+    def _retire_missing_documents(self, tenant_id: str, stale_source_ids: list[str]) -> None:
+        """Retire current documents whose external source ids disappeared from a completed sync cycle."""
+
+        if not stale_source_ids:
+            return
+        stale_set = set(stale_source_ids)
+        for document in self.repository.list_documents(tenant_id):
+            if document.source_connector != self.feishu_client.provider:
+                continue
+            if not document.current:
+                continue
+            if not document.source_document_id or document.source_document_id not in stale_set:
+                continue
+            self.document_service.retire_document_system(
+                document.id,
+                reason="retired because source disappeared from Feishu sync scope",
+            )

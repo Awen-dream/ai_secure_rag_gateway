@@ -36,6 +36,9 @@ class KeywordSearchBackend(Protocol):
     def upsert_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
         """Sync the latest document snapshot into the keyword index."""
 
+    def delete_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
+        """Remove one document snapshot from the keyword index."""
+
     def describe_backend(self):
         """Return deployment metadata for this keyword backend."""
 
@@ -56,6 +59,9 @@ class VectorSearchBackend(Protocol):
 
     def upsert_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
         """Sync the latest document snapshot into the vector index."""
+
+    def delete_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
+        """Remove one document snapshot from the vector index."""
 
     def describe_backend(self):
         """Return deployment metadata for this vector backend."""

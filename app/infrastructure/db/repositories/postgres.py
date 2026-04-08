@@ -229,6 +229,8 @@ class PostgresRepository:
                     run_count INTEGER NOT NULL DEFAULT 0,
                     success_count INTEGER NOT NULL DEFAULT 0,
                     failure_count INTEGER NOT NULL DEFAULT 0,
+                    managed_source_document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    cycle_seen_source_document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
                     last_run_id TEXT,
                     last_run_status TEXT,
                     last_run_at TIMESTAMPTZ,
@@ -678,9 +680,10 @@ class PostgresRepository:
                     id, tenant_id, provider, name, created_by, source_root, space_id, parent_node_token, cursor,
                     limit_value, continue_on_error, default_owner_id, default_department_scope, default_visibility_scope,
                     default_security_level, default_tags, default_async_mode, enabled, status, last_error, run_count,
-                    success_count, failure_count, last_run_id, last_run_status, last_run_at, created_at, updated_at
+                    success_count, failure_count, managed_source_document_ids, cycle_seen_source_document_ids,
+                    last_run_id, last_run_status, last_run_at, created_at, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     tenant_id = EXCLUDED.tenant_id,
@@ -705,6 +708,8 @@ class PostgresRepository:
                     run_count = EXCLUDED.run_count,
                     success_count = EXCLUDED.success_count,
                     failure_count = EXCLUDED.failure_count,
+                    managed_source_document_ids = EXCLUDED.managed_source_document_ids,
+                    cycle_seen_source_document_ids = EXCLUDED.cycle_seen_source_document_ids,
                     last_run_id = EXCLUDED.last_run_id,
                     last_run_status = EXCLUDED.last_run_status,
                     last_run_at = EXCLUDED.last_run_at,
@@ -734,6 +739,8 @@ class PostgresRepository:
                     job.run_count,
                     job.success_count,
                     job.failure_count,
+                    self._dump_json(job.managed_source_document_ids),
+                    self._dump_json(job.cycle_seen_source_document_ids),
                     job.last_run_id,
                     job.last_run_status,
                     job.last_run_at,
@@ -919,6 +926,8 @@ class PostgresRepository:
             run_count=row["run_count"],
             success_count=row["success_count"],
             failure_count=row["failure_count"],
+            managed_source_document_ids=self._load_json(row["managed_source_document_ids"]),
+            cycle_seen_source_document_ids=self._load_json(row["cycle_seen_source_document_ids"]),
             last_run_id=row.get("last_run_id"),
             last_run_status=row.get("last_run_status"),
             last_run_at=self._to_datetime(row["last_run_at"]) if row.get("last_run_at") else None,

@@ -94,6 +94,23 @@ class PGVectorStore:
             "executed": executed,
         }
 
+    def delete_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
+        """Remove all stored embeddings for one document."""
+
+        executed = False
+        if self.can_execute():
+            self._execute_delete(document.id)
+            executed = True
+
+        return {
+            "backend": self.backend_name,
+            "table": self.table_name,
+            "doc_id": document.id,
+            "chunks_deleted": len(chunks),
+            "delete_sql_preview": self.build_delete_sql(),
+            "executed": executed,
+        }
+
     def describe_backend(self) -> RetrievalBackendInfo:
         """Return deployment and capability metadata for the vector backend."""
 
@@ -273,6 +290,11 @@ ORDER BY embedding <=> %(query_embedding)s
 LIMIT {top_k};
 """.strip()
 
+    def build_delete_sql(self) -> str:
+        """Return the SQL template used to delete one document from pgvector storage."""
+
+        return f"DELETE FROM {self.table_name} WHERE doc_id = %(doc_id)s;"
+
     def _execute_upsert(self, rows: Sequence[dict]) -> None:
         """Execute pgvector upserts against a real PostgreSQL backend when configured."""
 
@@ -282,6 +304,15 @@ LIMIT {top_k};
         with psycopg.connect(self.dsn) as connection:
             with connection.cursor() as cursor:
                 cursor.executemany(sql, rows)
+
+    def _execute_delete(self, doc_id: str) -> None:
+        """Execute one pgvector document delete when the backend is enabled."""
+
+        if not self.can_execute():
+            return
+        with psycopg.connect(self.dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(self.build_delete_sql(), {"doc_id": doc_id})
 
     def _execute_search(
         self,

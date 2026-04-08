@@ -50,6 +50,8 @@ class SourceSyncJob(BaseModel):
     run_count: int = 0
     success_count: int = 0
     failure_count: int = 0
+    managed_source_document_ids: list[str] = Field(default_factory=list)
+    cycle_seen_source_document_ids: list[str] = Field(default_factory=list)
     last_run_id: Optional[str] = None
     last_run_status: Optional[str] = None
     last_run_at: Optional[datetime] = None

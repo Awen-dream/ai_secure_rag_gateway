@@ -88,6 +88,25 @@ class ElasticsearchSearch:
             "executed": executed,
         }
 
+    def delete_document(self, document: DocumentRecord, chunks: Sequence[DocumentChunk]) -> dict:
+        """Remove all indexed chunks for one document."""
+
+        executed = False
+        if self.can_execute() and chunks:
+            try:
+                self._bulk_delete(chunks)
+                executed = True
+            except Exception:
+                executed = False
+
+        return {
+            "backend": self.backend_name,
+            "index": self.index_name,
+            "doc_id": document.id,
+            "chunks_deleted": len(chunks),
+            "executed": executed,
+        }
+
     def describe_backend(self) -> RetrievalBackendInfo:
         """Return deployment and capability metadata for the keyword backend."""
 
@@ -293,6 +312,20 @@ class ElasticsearchSearch:
         """Execute a real Elasticsearch bulk indexing request."""
 
         payload = self.build_bulk_payload(document, chunks)
+        return self._request_json(
+            "POST",
+            "/_bulk?refresh=wait_for",
+            raw_body=(payload + "\n").encode("utf-8"),
+            headers={"Content-Type": "application/x-ndjson"},
+        )
+
+    def _bulk_delete(self, chunks: Sequence[DocumentChunk]) -> dict:
+        """Execute a real Elasticsearch bulk delete request."""
+
+        payload = "\n".join(
+            json.dumps({"delete": {"_index": self.index_name, "_id": chunk.id}}, ensure_ascii=False)
+            for chunk in chunks
+        )
         return self._request_json(
             "POST",
             "/_bulk?refresh=wait_for",

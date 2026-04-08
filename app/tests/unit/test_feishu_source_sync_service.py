@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.auth.models import UserContext
+from app.domain.documents.models import DocumentStatus
 from app.domain.documents.services import DocumentService
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.domain.sources.schemas import (
@@ -34,19 +35,20 @@ class _FakeFeishuClient:
     def parse_source(self, source: str):
         from app.infrastructure.external_sources.feishu import FeishuSourceReference
 
-        return FeishuSourceReference(source_kind="wiki", token="wiki_token")
+        return FeishuSourceReference(source_kind="wiki", token=source.rstrip("/").split("/")[-1])
 
     def fetch_document(self, source: str):
         if source in self.fail_sources:
             raise RuntimeError("simulated fetch failure")
         from app.infrastructure.external_sources.feishu import FeishuDocumentContent
 
+        token = source.rstrip("/").split("/")[-1]
         return FeishuDocumentContent(
-            title="飞书报销制度",
+            title=f"飞书报销制度 {token}",
             content=self.content,
             source_type="markdown",
             source_uri=source,
-            external_document_id="wiki_token",
+            external_document_id=token,
         )
 
     def health_check(self) -> dict:
@@ -67,7 +69,7 @@ class _FakeFeishuClient:
             ExternalSourceItem(
                 source=source,
                 source_kind="wiki",
-                external_document_id="wiki_token",
+                external_document_id=source.rstrip("/").split("/")[-1],
                 title=f"Listed {index}",
                 space_id=space_id or "space_1",
                 node_token=source.rstrip("/").split("/")[-1],
@@ -436,6 +438,39 @@ class FeishuSourceSyncServiceTest(unittest.TestCase):
         self.assertEqual(summary.succeeded_jobs, 1)
         self.assertEqual(summary.failed_jobs, 0)
         self.assertEqual(summary.skipped_jobs, 1)
+
+    def test_completed_sync_cycle_retires_missing_documents(self) -> None:
+        self.feishu_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+            "https://example.feishu.cn/wiki/wiki_token_2",
+        ]
+        job = self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="finance wiki",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=10,
+                default_department_scope=["finance"],
+                default_async_mode=False,
+            ),
+            self.user,
+        )
+
+        self.service.run_sync_job(job.job_id, self.user)
+        second_doc = self.repository.find_current_document_by_source_ref("t1", "feishu", "wiki_token_2")
+        self.assertIsNotNone(second_doc)
+        self.assertTrue(self.service.document_service.source_store.has_source(second_doc.id, second_doc.source_type))
+
+        self.feishu_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+        ]
+        self.service.run_sync_job(job.job_id, self.user)
+
+        history = self.repository.list_documents_by_source_ref("t1", "feishu", "wiki_token_2")
+        self.assertEqual(len(history), 1)
+        retired = history[0]
+        self.assertFalse(retired.current)
+        self.assertEqual(retired.status, DocumentStatus.RETIRED)
+        self.assertFalse(self.service.document_service.source_store.has_source(retired.id, retired.source_type))
 
 
 if __name__ == "__main__":

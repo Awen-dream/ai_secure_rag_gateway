@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS source_sync_jobs (
     run_count INTEGER NOT NULL DEFAULT 0,
     success_count INTEGER NOT NULL DEFAULT 0,
     failure_count INTEGER NOT NULL DEFAULT 0,
+    managed_source_document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    cycle_seen_source_document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     last_run_id TEXT,
     last_run_status TEXT,
     last_run_at TIMESTAMPTZ,
