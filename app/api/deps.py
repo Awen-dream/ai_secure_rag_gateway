@@ -260,7 +260,10 @@ def get_chat_service() -> ChatService:
         audit_service=get_audit_service(),
         openai_client=get_openai_client(),
         session_cache=get_session_cache(),
-        conversation_manager=ConversationManager(get_repository()),
+        conversation_manager=ConversationManager(
+            get_repository(),
+            query_understanding=QueryUnderstandingService(get_openai_client()),
+        ),
     )
 
 

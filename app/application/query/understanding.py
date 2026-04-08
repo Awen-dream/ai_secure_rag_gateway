@@ -27,15 +27,34 @@ class QueryUnderstandingService:
     def __init__(self, openai_client: OpenAIClient | None = None) -> None:
         self.openai_client = openai_client
 
-    def understand(self, query: str) -> QueryUnderstandingResult:
-        fallback = self._fallback_result(query)
-        if not self._should_use_llm(query, fallback):
+    def understand(
+        self,
+        query: str,
+        last_user_query: str | None = None,
+        session_summary: str | None = None,
+    ) -> QueryUnderstandingResult:
+        fallback = self._fallback_result(
+            query,
+            last_user_query=last_user_query,
+            session_summary=session_summary,
+        )
+        if not self._should_use_llm(
+            query,
+            fallback,
+            last_user_query=last_user_query,
+            session_summary=session_summary,
+        ):
             return fallback
 
         try:
             response_text = self.openai_client.generate_response(
                 instructions=self._build_instructions(),
-                input_text=self._build_input(query, fallback),
+                input_text=self._build_input(
+                    query,
+                    fallback,
+                    last_user_query=last_user_query,
+                    session_summary=session_summary,
+                ),
             )
             return self._parse_llm_result(response_text, query, fallback)
         except Exception:
@@ -47,8 +66,15 @@ class QueryUnderstandingService:
                 source="fallback",
             )
 
-    def _fallback_result(self, query: str) -> QueryUnderstandingResult:
+    def _fallback_result(
+        self,
+        query: str,
+        last_user_query: str | None = None,
+        session_summary: str | None = None,
+    ) -> QueryUnderstandingResult:
         rewritten_query = rewrite_query(query)
+        if last_user_query:
+            rewritten_query = rewrite_query(f"{last_user_query} {query}")
         intent_result = classify_query_intent_details(rewritten_query)
         return QueryUnderstandingResult(
             rewritten_query=rewritten_query,
@@ -58,11 +84,19 @@ class QueryUnderstandingService:
             source="rule",
         )
 
-    def _should_use_llm(self, query: str, fallback: QueryUnderstandingResult) -> bool:
+    def _should_use_llm(
+        self,
+        query: str,
+        fallback: QueryUnderstandingResult,
+        last_user_query: str | None = None,
+        session_summary: str | None = None,
+    ) -> bool:
         if not self.openai_client or not self.openai_client.can_execute():
             return False
 
         normalized = rewrite_query(query)
+        if last_user_query or session_summary:
+            return True
         if len(normalized) <= 18:
             return True
         if fallback.intent == "summary":
@@ -84,14 +118,24 @@ class QueryUnderstandingService:
         )
 
     @staticmethod
-    def _build_input(query: str, fallback: QueryUnderstandingResult) -> str:
-        return (
+    def _build_input(
+        query: str,
+        fallback: QueryUnderstandingResult,
+        last_user_query: str | None = None,
+        session_summary: str | None = None,
+    ) -> str:
+        lines = [
             f"original_query: {query}\n"
             f"fallback_rewritten_query: {fallback.rewritten_query}\n"
             f"fallback_intent: {fallback.intent}\n"
             f"fallback_confidence: {fallback.confidence}\n"
             f"fallback_reasons: {', '.join(fallback.reasons)}"
-        )
+        ]
+        if last_user_query:
+            lines.append(f"last_user_query: {last_user_query}")
+        if session_summary:
+            lines.append(f"session_summary: {session_summary[:240]}")
+        return "\n".join(lines)
 
     def _parse_llm_result(
         self,

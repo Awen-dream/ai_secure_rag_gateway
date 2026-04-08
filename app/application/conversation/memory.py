@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from app.application.conversation.summarizer import summarize_long_history
 from app.application.query.intent import classify_query_intent
 from app.application.query.rewrite import rewrite_query
+from app.application.query.understanding import QueryUnderstandingService
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession
 from app.infrastructure.db.repositories.base import MetadataRepository
@@ -54,8 +55,13 @@ def build_permission_signature(user: UserContext) -> str:
 class ConversationManager:
     """Owns follow-up rewriting, topic tracking, and permission-aware session context reuse."""
 
-    def __init__(self, repository: MetadataRepository) -> None:
+    def __init__(
+        self,
+        repository: MetadataRepository,
+        query_understanding: QueryUnderstandingService | None = None,
+    ) -> None:
         self.repository = repository
+        self.query_understanding = query_understanding or QueryUnderstandingService()
 
     def build_context(self, session: ChatSession, user: UserContext, query: str) -> ConversationContext:
         """Rewrite the current query using recent history, topic continuity, and permission boundaries."""
@@ -70,9 +76,12 @@ class ConversationManager:
         topic_switched = self._did_topic_switch(previous_topic, active_topic)
         should_use_history = bool(messages) and not permission_changed and not topic_switched and self._is_follow_up(query)
 
-        rewritten_query = rewrite_query(query)
-        if should_use_history and last_user_query:
-            rewritten_query = rewrite_query(f"{last_user_query} {query}")
+        understanding = self.query_understanding.understand(
+            query,
+            last_user_query=last_user_query if should_use_history else None,
+            session_summary=summary if should_use_history else None,
+        )
+        rewritten_query = understanding.rewritten_query
 
         if permission_changed:
             active_topic = self._infer_topic(query)
