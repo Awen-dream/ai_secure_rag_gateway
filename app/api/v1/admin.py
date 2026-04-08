@@ -5,6 +5,7 @@ from app.api.deps import (
     get_keyword_backend,
     get_policy_engine,
     get_prompt_service,
+    get_redis_client,
     get_retrieval_service,
     get_vector_backend,
 )
@@ -23,6 +24,7 @@ from app.domain.retrieval.models import (
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import PolicyDefinition
 from app.domain.risk.services import PolicyEngine
+from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
@@ -167,3 +169,18 @@ def get_retrieval_backend_health(
     if backend == "pgvector":
         return vector_backend.health_check()
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported retrieval backend.")
+
+
+@router.get("/cache/health")
+def get_cache_health(
+    _: UserContext = Depends(require_admin),
+    redis_client: RedisClient = Depends(get_redis_client),
+) -> dict:
+    """Return Redis cache availability information for cache, session and rate-limit diagnostics."""
+
+    return {
+        "backend": "redis",
+        "execute_enabled": redis_client.can_execute(),
+        "reachable": redis_client.ping(),
+        "mode": redis_client.mode,
+    }

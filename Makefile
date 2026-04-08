@@ -6,13 +6,16 @@ UNIT_TESTS = \
 	app.tests.unit.test_ingestion_pipelines \
 	app.tests.unit.test_import \
 	app.tests.unit.test_hybrid_retrieval \
+	app.tests.unit.test_cache_services \
+	app.tests.unit.test_chat_rate_limit \
 	app.tests.unit.test_openai_client \
 	app.tests.unit.test_chat_llm_integration \
 	app.tests.unit.test_retrieval_backends \
 	app.tests.unit.test_admin_retrieval_endpoints
 INTEGRATION_TESTS = \
 	app.tests.integration.test_pg_es_retrieval_integration \
-	app.tests.integration.test_postgres_metadata_repository_integration
+	app.tests.integration.test_postgres_metadata_repository_integration \
+	app.tests.integration.test_redis_integration
 
 .PHONY: install run test-unit test-integration test-all integration-up integration-down compile
 

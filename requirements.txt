@@ -4,3 +4,4 @@ pydantic
 tiktoken
 psycopg[binary]
 httpx
+redis

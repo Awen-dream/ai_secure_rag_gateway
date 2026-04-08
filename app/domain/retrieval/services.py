@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from app.application.query.intent import classify_query_intent
+from app.application.query.retrieval_cache import RetrievalCache
 from app.application.query.rewrite import rewrite_query
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
@@ -23,10 +26,12 @@ class RetrievalService:
         document_service: DocumentService,
         keyword_backend: KeywordSearchBackend,
         vector_backend: VectorSearchBackend,
+        retrieval_cache: RetrievalCache | None = None,
     ) -> None:
         self.document_service = document_service
         self.keyword_backend = keyword_backend
         self.vector_backend = vector_backend
+        self.retrieval_cache = retrieval_cache
 
     def retrieve(self, user: UserContext, query: str, top_k: int = 5) -> list[RetrievalResult]:
         """Run permission-aware hybrid retrieval and return fused evidence chunks."""
@@ -41,7 +46,15 @@ class RetrievalService:
         intent = classify_query_intent(rewritten)
         profile = get_retrieval_profile(intent)
         terms = normalize_terms(rewritten)
-        results = self._hybrid_retrieve(user, rewritten, terms, profile)
+        cached_results = None
+        if self.retrieval_cache:
+            cached_results = self.retrieval_cache.get_results(user, rewritten, min(top_k, profile.top_k))
+        if cached_results is not None:
+            results = cached_results
+        else:
+            results = self._hybrid_retrieve(user, rewritten, terms, profile)
+            if self.retrieval_cache:
+                self.retrieval_cache.set_results(user, rewritten, min(top_k, profile.top_k), results)
         return RetrievalExplainResponse(
             rewritten_query=rewritten,
             intent=intent,

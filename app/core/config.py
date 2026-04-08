@@ -12,6 +12,12 @@ class AppSettings(BaseModel):
     sqlite_path: str = os.getenv("APP_SQLITE_PATH", ".data/secure_rag_gateway.db")
     postgres_dsn: Optional[str] = os.getenv("APP_POSTGRES_DSN")
     postgres_auto_init_schema: bool = os.getenv("APP_POSTGRES_AUTO_INIT_SCHEMA", "true").lower() == "true"
+    redis_mode: str = os.getenv("APP_REDIS_MODE", "local-fallback")
+    redis_url: Optional[str] = os.getenv("APP_REDIS_URL")
+    session_cache_ttl_seconds: int = int(os.getenv("APP_SESSION_CACHE_TTL_SECONDS", "3600"))
+    retrieval_cache_ttl_seconds: int = int(os.getenv("APP_RETRIEVAL_CACHE_TTL_SECONDS", "300"))
+    rate_limit_window_seconds: int = int(os.getenv("APP_RATE_LIMIT_WINDOW_SECONDS", "60"))
+    rate_limit_max_requests: int = int(os.getenv("APP_RATE_LIMIT_MAX_REQUESTS", "30"))
     elasticsearch_index: str = os.getenv("APP_ELASTICSEARCH_INDEX", "knowledge_chunks")
     elasticsearch_mode: str = os.getenv("APP_ELASTICSEARCH_MODE", "local-fallback")
     elasticsearch_endpoint: Optional[str] = os.getenv("APP_ELASTICSEARCH_ENDPOINT")

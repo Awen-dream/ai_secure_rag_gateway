@@ -1,31 +1,30 @@
 import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 
-class ChatLLMIntegrationTest(unittest.TestCase):
+class ChatRateLimitTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.db_path = "/tmp/secure_rag_gateway_chat_llm.db"
+        self.db_path = "/tmp/secure_rag_gateway_rate_limit.db"
         Path(self.db_path).unlink(missing_ok=True)
 
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["APP_REDIS_MODE"] = "local-fallback"
-        os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
-        os.environ["OPENAI_API_KEY"] = "test-key"
-        os.environ["OPENAI_MODEL"] = "gpt-5.4-mini"
+        os.environ["APP_RATE_LIMIT_WINDOW_SECONDS"] = "60"
+        os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "1"
+        os.environ["OPENAI_API_KEY"] = ""
 
         from app.core.config import settings
 
         settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
         settings.redis_mode = "local-fallback"
-        settings.rate_limit_max_requests = 30
-        settings.openai_api_key = "test-key"
-        settings.openai_model = "gpt-5.4-mini"
+        settings.rate_limit_window_seconds = 60
+        settings.rate_limit_max_requests = 1
+        settings.openai_api_key = None
 
         from app.api.deps import (
             get_audit_service,
@@ -68,46 +67,30 @@ class ChatLLMIntegrationTest(unittest.TestCase):
 
         self.client = TestClient(app)
         self.headers = {
-            "X-User-Id": "u1",
+            "X-User-Id": "u-rate-limit",
             "X-Tenant-Id": "t1",
             "X-Department-Id": "engineering",
             "X-Role": "employee",
             "X-Clearance-Level": "2",
         }
-
-    def tearDown(self) -> None:
-        os.environ["OPENAI_API_KEY"] = ""
-
-    def test_chat_query_uses_openai_client_when_configured(self) -> None:
-        upload = self.client.post(
+        self.client.post(
             "/api/v1/docs/upload",
             json={
                 "title": "报销制度",
-                "content": "报销制度说明。\n\n审批时限为3个工作日。",
+                "content": "审批时限为3个工作日。",
                 "department_scope": ["engineering"],
                 "security_level": 1,
             },
             headers=self.headers,
         )
-        self.assertEqual(upload.status_code, 200)
 
-        mocked_answer = "结论：审批时限为3个工作日。\n依据：[1] 报销制度。\n引用来源：[1] 报销制度 / Section 1 / v1"
-        with patch(
-            "app.infrastructure.llm.openai_client.OpenAIClient.generate_response",
-            return_value=mocked_answer,
-        ) as generate_response:
-            response = self.client.post(
-                "/api/v1/chat/query",
-                json={"query": "报销审批时限是什么？"},
-                headers=self.headers,
-            )
+    def test_chat_query_returns_429_after_limit(self) -> None:
+        first = self.client.post("/api/v1/chat/query", json={"query": "报销审批时限是什么？"}, headers=self.headers)
+        second = self.client.post("/api/v1/chat/query", json={"query": "再问一次"}, headers=self.headers)
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["answer"], mocked_answer)
-        self.assertEqual(payload["risk_action"], "allow")
-        self.assertEqual(len(payload["citations"]), 1)
-        generate_response.assert_called_once()
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.json()["detail"], "Rate limit exceeded.")
 
 
 if __name__ == "__main__":

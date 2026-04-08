@@ -16,6 +16,8 @@ class PostgresMetadataRepositoryIntegrationTest(unittest.TestCase):
         os.environ["APP_REPOSITORY_BACKEND"] = "postgres"
         os.environ["APP_POSTGRES_DSN"] = POSTGRES_DSN
         os.environ["APP_POSTGRES_AUTO_INIT_SCHEMA"] = "true"
+        os.environ["APP_REDIS_MODE"] = "local-fallback"
+        os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
         os.environ["APP_ELASTICSEARCH_MODE"] = "local-fallback"
         os.environ["APP_PGVECTOR_MODE"] = "local-fallback"
         os.environ["OPENAI_API_KEY"] = ""
@@ -25,6 +27,8 @@ class PostgresMetadataRepositoryIntegrationTest(unittest.TestCase):
         settings.repository_backend = "postgres"
         settings.postgres_dsn = POSTGRES_DSN
         settings.postgres_auto_init_schema = True
+        settings.redis_mode = "local-fallback"
+        settings.rate_limit_max_requests = 30
         settings.elasticsearch_mode = "local-fallback"
         settings.pgvector_mode = "local-fallback"
         settings.openai_api_key = None
@@ -38,13 +42,21 @@ class PostgresMetadataRepositoryIntegrationTest(unittest.TestCase):
             get_openai_client,
             get_policy_engine,
             get_prompt_service,
+            get_rate_limit_service,
+            get_redis_client,
             get_repository,
+            get_retrieval_cache,
             get_retrieval_service,
+            get_session_cache,
             get_vector_backend,
         )
 
         for factory in (
             get_repository,
+            get_redis_client,
+            get_session_cache,
+            get_retrieval_cache,
+            get_rate_limit_service,
             get_keyword_backend,
             get_vector_backend,
             get_indexing_service,

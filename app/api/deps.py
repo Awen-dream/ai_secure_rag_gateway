@@ -1,13 +1,17 @@
 from functools import lru_cache
 
 from app.core.config import settings
+from app.application.conversation.session_cache import SessionCache
+from app.application.query.retrieval_cache import RetrievalCache
 from app.domain.audit.services import AuditService
 from app.domain.chat.services import ChatService
 from app.domain.documents.services import DocumentService
 from app.domain.prompts.services import PromptService
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.domain.retrieval.services import RetrievalService
+from app.domain.risk.rate_limit import RateLimitService
 from app.domain.risk.services import PolicyEngine
+from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.db.repositories.postgres import PostgresRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
@@ -28,6 +32,44 @@ def get_repository() -> MetadataRepository:
             auto_init_schema=settings.postgres_auto_init_schema,
         )
     return SQLiteRepository(settings.sqlite_path)
+
+
+@lru_cache
+def get_redis_client() -> RedisClient:
+    """Return the configured Redis cache client used for session cache, retrieval cache and rate limiting."""
+
+    return RedisClient(mode=settings.redis_mode, url=settings.redis_url)
+
+
+@lru_cache
+def get_session_cache() -> SessionCache:
+    """Return the session cache service backed by Redis or its local fallback."""
+
+    return SessionCache(
+        redis_client=get_redis_client(),
+        ttl_seconds=settings.session_cache_ttl_seconds,
+    )
+
+
+@lru_cache
+def get_retrieval_cache() -> RetrievalCache:
+    """Return the retrieval result cache service backed by Redis or its local fallback."""
+
+    return RetrievalCache(
+        redis_client=get_redis_client(),
+        ttl_seconds=settings.retrieval_cache_ttl_seconds,
+    )
+
+
+@lru_cache
+def get_rate_limit_service() -> RateLimitService:
+    """Return the fixed-window rate limiter used by user-facing chat endpoints."""
+
+    return RateLimitService(
+        redis_client=get_redis_client(),
+        window_seconds=settings.rate_limit_window_seconds,
+        max_requests=settings.rate_limit_max_requests,
+    )
 
 
 @lru_cache
@@ -115,6 +157,7 @@ def get_retrieval_service() -> RetrievalService:
         document_service=get_document_service(),
         keyword_backend=get_keyword_backend(),
         vector_backend=get_vector_backend(),
+        retrieval_cache=get_retrieval_cache(),
     )
 
 
@@ -129,4 +172,5 @@ def get_chat_service() -> ChatService:
         policy_engine=get_policy_engine(),
         audit_service=get_audit_service(),
         openai_client=get_openai_client(),
+        session_cache=get_session_cache(),
     )

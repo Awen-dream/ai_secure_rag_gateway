@@ -13,6 +13,8 @@ class PgEsRetrievalIntegrationTest(unittest.TestCase):
 
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = cls.db_path
+        os.environ["APP_REDIS_MODE"] = "local-fallback"
+        os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
         os.environ["APP_ELASTICSEARCH_MODE"] = "remote"
         os.environ["APP_ELASTICSEARCH_ENDPOINT"] = "http://127.0.0.1:9200"
         os.environ["APP_ELASTICSEARCH_AUTO_INIT_INDEX"] = "true"
@@ -26,6 +28,8 @@ class PgEsRetrievalIntegrationTest(unittest.TestCase):
 
         settings.repository_backend = "sqlite"
         settings.sqlite_path = cls.db_path
+        settings.redis_mode = "local-fallback"
+        settings.rate_limit_max_requests = 30
         settings.elasticsearch_mode = "remote"
         settings.elasticsearch_endpoint = "http://127.0.0.1:9200"
         settings.elasticsearch_auto_init_index = True
@@ -44,13 +48,21 @@ class PgEsRetrievalIntegrationTest(unittest.TestCase):
             get_openai_client,
             get_policy_engine,
             get_prompt_service,
+            get_rate_limit_service,
+            get_redis_client,
             get_repository,
+            get_retrieval_cache,
             get_retrieval_service,
+            get_session_cache,
             get_vector_backend,
         )
 
         for factory in (
             get_repository,
+            get_redis_client,
+            get_session_cache,
+            get_retrieval_cache,
+            get_rate_limit_service,
             get_keyword_backend,
             get_vector_backend,
             get_indexing_service,

@@ -13,11 +13,13 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
 
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
+        os.environ["APP_REDIS_MODE"] = "local-fallback"
         os.environ["OPENAI_API_KEY"] = ""
         from app.core.config import settings
 
         settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
+        settings.redis_mode = "local-fallback"
         settings.openai_api_key = None
 
         from app.api.deps import (
@@ -29,13 +31,21 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_openai_client,
             get_policy_engine,
             get_prompt_service,
+            get_rate_limit_service,
+            get_redis_client,
             get_repository,
+            get_retrieval_cache,
             get_retrieval_service,
+            get_session_cache,
             get_vector_backend,
         )
 
         for factory in (
             get_repository,
+            get_redis_client,
+            get_session_cache,
+            get_retrieval_cache,
+            get_rate_limit_service,
             get_keyword_backend,
             get_vector_backend,
             get_indexing_service,
@@ -67,6 +77,14 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(len(payload), 2)
         self.assertEqual(payload[0]["backend"], "elasticsearch")
         self.assertEqual(payload[1]["backend"], "pgvector")
+
+    def test_admin_can_view_cache_health(self) -> None:
+        response = self.client.get("/api/v1/admin/cache/health", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["backend"], "redis")
+        self.assertFalse(payload["execute_enabled"])
+        self.assertTrue(payload["reachable"])
 
     def test_admin_can_view_backend_plan(self) -> None:
         es_response = self.client.get(

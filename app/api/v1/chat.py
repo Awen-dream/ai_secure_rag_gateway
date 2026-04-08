@@ -3,11 +3,12 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_chat_service
+from app.api.deps import get_chat_service, get_rate_limit_service
 from app.core.security import get_current_user
 from app.domain.auth.models import UserContext
 from app.domain.chat.schemas import ChatQueryRequest, ChatQueryResponse
 from app.domain.chat.services import ChatService
+from app.domain.risk.rate_limit import RateLimitService
 
 router = APIRouter()
 
@@ -17,7 +18,11 @@ def query_chat(
     payload: ChatQueryRequest,
     user: UserContext = Depends(get_current_user),
     service: ChatService = Depends(get_chat_service),
+    rate_limiter: RateLimitService = Depends(get_rate_limit_service),
 ) -> ChatQueryResponse:
+    allowed, _ = rate_limiter.check_user(user.user_id, scope="chat.query")
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded.")
     try:
         return service.query(payload, user)
     except KeyError as exc:
@@ -29,7 +34,11 @@ def stream_chat(
     payload: ChatQueryRequest,
     user: UserContext = Depends(get_current_user),
     service: ChatService = Depends(get_chat_service),
+    rate_limiter: RateLimitService = Depends(get_rate_limit_service),
 ) -> StreamingResponse:
+    allowed, _ = rate_limiter.check_user(user.user_id, scope="chat.stream")
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded.")
     response = service.query(payload, user)
 
     def event_stream():

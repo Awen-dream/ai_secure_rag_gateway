@@ -69,6 +69,23 @@ make test-all
 - `OPENAI_MAX_OUTPUT_TOKENS`
 - `OPENAI_TEMPERATURE`
 
+## Redis 缓存与限流
+
+当前平台已支持 Redis 用于：
+
+- 会话摘要缓存
+- 检索结果缓存
+- 用户问答限流
+
+相关环境变量：
+
+- `APP_REDIS_MODE`
+- `APP_REDIS_URL`
+- `APP_SESSION_CACHE_TTL_SECONDS`
+- `APP_RETRIEVAL_CACHE_TTL_SECONDS`
+- `APP_RATE_LIMIT_WINDOW_SECONDS`
+- `APP_RATE_LIMIT_MAX_REQUESTS`
+
 快速查看某段文本在当前 tokenizer 下的 token 数和 chunk 分布：
 
 ```bash
@@ -103,6 +120,7 @@ scripts/
 - `GET /api/v1/admin/audit`
 - `GET /api/v1/admin/retrieval/backends`
 - `GET /api/v1/admin/retrieval/backends/{backend}/health`
+- `GET /api/v1/admin/cache/health`
 - `POST /api/v1/admin/retrieval/explain`
 - `GET /api/v1/admin/retrieval/backends/{backend}/plan`
 - `POST /api/v1/admin/retrieval/backends/elasticsearch/init-index`
@@ -150,6 +168,13 @@ scripts/
 - PostgreSQL 仓储
 - 统一仓储契约，服务层无感切换
 - PostgreSQL 初始化 SQL，见 `migrations/0001_postgres_metadata.sql`
+
+当前缓存层已包含：
+
+- Redis client 与本地 fallback
+- session summary cache
+- retrieval cache
+- chat 接口固定窗口限流
 
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 
