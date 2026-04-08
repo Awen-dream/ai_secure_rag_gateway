@@ -20,6 +20,8 @@ class ChatSession(BaseModel):
     scene: str
     status: SessionStatus = SessionStatus.ACTIVE
     summary: str = ""
+    active_topic: str = ""
+    permission_signature: str = ""
     created_at: datetime
     updated_at: datetime
 

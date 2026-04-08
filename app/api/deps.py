@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from app.application.conversation.memory import ConversationManager
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.core.config import settings
 from app.application.conversation.session_cache import SessionCache
@@ -256,6 +257,7 @@ def get_chat_service() -> ChatService:
         audit_service=get_audit_service(),
         openai_client=get_openai_client(),
         session_cache=get_session_cache(),
+        conversation_manager=ConversationManager(get_repository()),
     )
 
 

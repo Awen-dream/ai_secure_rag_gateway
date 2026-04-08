@@ -93,10 +93,16 @@ class PostgresRepository:
                     scene TEXT NOT NULL,
                     status TEXT NOT NULL,
                     summary TEXT NOT NULL,
+                    active_topic TEXT NOT NULL DEFAULT '',
+                    permission_signature TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL
                 )
                 """
+            )
+            connection.execute("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS active_topic TEXT NOT NULL DEFAULT ''")
+            connection.execute(
+                "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS permission_signature TEXT NOT NULL DEFAULT ''"
             )
             connection.execute(
                 """
@@ -324,14 +330,18 @@ class PostgresRepository:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO chat_sessions (id, tenant_id, user_id, scene, status, summary, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO chat_sessions (
+                    id, tenant_id, user_id, scene, status, summary, active_topic, permission_signature, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     tenant_id = EXCLUDED.tenant_id,
                     user_id = EXCLUDED.user_id,
                     scene = EXCLUDED.scene,
                     status = EXCLUDED.status,
                     summary = EXCLUDED.summary,
+                    active_topic = EXCLUDED.active_topic,
+                    permission_signature = EXCLUDED.permission_signature,
                     created_at = EXCLUDED.created_at,
                     updated_at = EXCLUDED.updated_at
                 """,
@@ -342,6 +352,8 @@ class PostgresRepository:
                     session.scene,
                     session.status.value,
                     session.summary,
+                    session.active_topic,
+                    session.permission_signature,
                     session.created_at,
                     session.updated_at,
                 ),
@@ -527,6 +539,8 @@ class PostgresRepository:
             scene=row["scene"],
             status=row["status"],
             summary=row["summary"],
+            active_topic=row.get("active_topic", ""),
+            permission_signature=row.get("permission_signature", ""),
             created_at=self._to_datetime(row["created_at"]),
             updated_at=self._to_datetime(row["updated_at"]),
         )

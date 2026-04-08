@@ -79,6 +79,8 @@ class SQLiteRepository:
                     scene TEXT NOT NULL,
                     status TEXT NOT NULL,
                     summary TEXT NOT NULL,
+                    active_topic TEXT NOT NULL DEFAULT '',
+                    permission_signature TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -134,6 +136,13 @@ class SQLiteRepository:
             }
             if "last_error" not in existing_document_columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN last_error TEXT")
+            existing_session_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(chat_sessions)").fetchall()
+            }
+            if "active_topic" not in existing_session_columns:
+                connection.execute("ALTER TABLE chat_sessions ADD COLUMN active_topic TEXT NOT NULL DEFAULT ''")
+            if "permission_signature" not in existing_session_columns:
+                connection.execute("ALTER TABLE chat_sessions ADD COLUMN permission_signature TEXT NOT NULL DEFAULT ''")
 
     @staticmethod
     def _dump_json(value) -> str:
@@ -278,8 +287,10 @@ class SQLiteRepository:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO chat_sessions (id, tenant_id, user_id, scene, status, summary, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO chat_sessions (
+                    id, tenant_id, user_id, scene, status, summary, active_topic, permission_signature, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session.id,
@@ -288,6 +299,8 @@ class SQLiteRepository:
                     session.scene,
                     session.status.value,
                     session.summary,
+                    session.active_topic,
+                    session.permission_signature,
                     session.created_at.isoformat(),
                     session.updated_at.isoformat(),
                 ),
@@ -459,6 +472,8 @@ class SQLiteRepository:
             scene=row["scene"],
             status=row["status"],
             summary=row["summary"],
+            active_topic=row["active_topic"],
+            permission_signature=row["permission_signature"],
             created_at=self._to_datetime(row["created_at"]),
             updated_at=self._to_datetime(row["updated_at"]),
         )

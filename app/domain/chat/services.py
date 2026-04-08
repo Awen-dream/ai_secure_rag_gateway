@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from app.application.conversation.summarizer import summarize_recent_messages
+from app.application.conversation.memory import ConversationManager, build_permission_signature
+from app.application.conversation.summarizer import summarize_long_history, summarize_recent_messages
 from app.application.conversation.session_cache import SessionCache
 from app.domain.audit.services import AuditService
 from app.domain.auth.models import UserContext
@@ -35,6 +36,7 @@ class ChatService:
         audit_service: AuditService,
         openai_client: OpenAIClient,
         session_cache: SessionCache | None = None,
+        conversation_manager: ConversationManager | None = None,
     ) -> None:
         self.repository = repository
         self.retrieval_service = retrieval_service
@@ -44,6 +46,7 @@ class ChatService:
         self.audit_service = audit_service
         self.openai_client = openai_client
         self.session_cache = session_cache
+        self.conversation_manager = conversation_manager or ConversationManager(repository)
 
     def query(self, payload: ChatQueryRequest, user: UserContext) -> ChatQueryResponse:
         """Execute one secure RAG query with retrieval, risk control, generation and audit."""
@@ -54,18 +57,19 @@ class ChatService:
             cached_summary = self.session_cache.get_summary(session.id)
             if cached_summary:
                 session.summary = cached_summary
+        conversation_context = self.conversation_manager.build_context(session, user, payload.query)
         request_id = f"req_{uuid.uuid4().hex[:12]}"
         template = self.prompt_service.get_template(payload.scene)
-        retrieved = self.retrieval_service.retrieve(user, payload.query)
-        risk_action, risk_level = self.policy_engine.evaluate(user, payload.query, len(retrieved))
+        retrieved = self.retrieval_service.retrieve(user, conversation_context.rewritten_query)
+        risk_action, risk_level = self.policy_engine.evaluate(user, conversation_context.rewritten_query, len(retrieved))
         citations = build_citations(retrieved)
         raw_answer = self._build_answer(
-            query=payload.query,
+            query=conversation_context.rewritten_query,
             template=template,
             retrieved=retrieved,
             citations=citations,
             risk_action=risk_action,
-            session_summary=session.summary,
+            session_summary=conversation_context.session_summary,
         )
         guard_result = self.output_guard.apply(
             user=user,
@@ -79,7 +83,9 @@ class ChatService:
 
         self._append_message(session.id, "user", payload.query)
         self._append_message(session.id, "assistant", answer, citations)
-        session.summary = summarize_recent_messages(self.repository.list_messages(session.id))
+        session.active_topic = conversation_context.active_topic
+        session.permission_signature = conversation_context.permission_signature or build_permission_signature(user)
+        session.summary = summarize_long_history(self.repository.list_messages(session.id))
         session.updated_at = utcnow()
         self.repository.save_session(session)
         if self.session_cache:
@@ -91,7 +97,7 @@ class ChatService:
             user=user,
             session_id=session.id,
             request_id=request_id,
-            query=payload.query,
+            query=conversation_context.rewritten_query,
             retrieved=retrieved,
             answer=answer,
             risk_level=risk_level,
@@ -106,6 +112,8 @@ class ChatService:
             citations=citations,
             risk_action=risk_action,
             retrieved_chunks=len(retrieved),
+            rewritten_query=conversation_context.rewritten_query,
+            topic_switched=conversation_context.topic_switched,
         )
 
     @staticmethod
@@ -153,6 +161,7 @@ class ChatService:
             user_id=user.user_id,
             scene=payload.scene,
             status=SessionStatus.ACTIVE,
+            permission_signature=build_permission_signature(user),
             created_at=now,
             updated_at=now,
         )

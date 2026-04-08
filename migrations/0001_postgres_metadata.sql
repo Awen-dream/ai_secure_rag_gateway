@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     scene TEXT NOT NULL,
     status TEXT NOT NULL,
     summary TEXT NOT NULL,
+    active_topic TEXT NOT NULL DEFAULT '',
+    permission_signature TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );

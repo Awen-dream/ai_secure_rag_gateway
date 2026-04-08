@@ -7,6 +7,8 @@ UNIT_TESTS = \
 	app.tests.unit.test_document_ingestion_orchestrator \
 	app.tests.unit.test_document_ingestion_worker \
 	app.tests.unit.test_docs_file_upload \
+	app.tests.unit.test_conversation_memory \
+	app.tests.unit.test_chat_conversation_flow \
 	app.tests.unit.test_feishu_client \
 	app.tests.unit.test_feishu_source_sync_service \
 	app.tests.unit.test_ingestion_pipelines \

@@ -19,3 +19,5 @@ class ChatQueryResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     risk_action: RiskAction
     retrieved_chunks: int = 0
+    rewritten_query: str = ""
+    topic_switched: bool = False
