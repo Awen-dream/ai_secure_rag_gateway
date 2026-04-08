@@ -8,6 +8,9 @@ class DocumentUploadRequest(BaseModel):
     content: str
     source_type: str = "manual"
     source_uri: Optional[str] = None
+    source_connector: Optional[str] = None
+    source_document_id: Optional[str] = None
+    source_document_version: Optional[str] = None
     owner_id: Optional[str] = None
     department_scope: List[str] = Field(default_factory=list)
     visibility_scope: List[str] = Field(default_factory=lambda: ["tenant"])

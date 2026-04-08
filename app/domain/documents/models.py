@@ -23,6 +23,9 @@ class DocumentRecord(BaseModel):
     title: str
     source_type: str
     source_uri: Optional[str]
+    source_connector: Optional[str] = None
+    source_document_id: Optional[str] = None
+    source_document_version: Optional[str] = None
     owner_id: str
     department_scope: List[str] = Field(default_factory=list)
     visibility_scope: List[str] = Field(default_factory=list)

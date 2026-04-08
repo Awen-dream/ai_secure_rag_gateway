@@ -44,6 +44,9 @@ class PostgresRepository:
                     title TEXT NOT NULL,
                     source_type TEXT NOT NULL,
                     source_uri TEXT,
+                    source_connector TEXT,
+                    source_document_id TEXT,
+                    source_document_version TEXT,
                     owner_id TEXT NOT NULL,
                     department_scope JSONB NOT NULL,
                     visibility_scope JSONB NOT NULL,
@@ -60,12 +63,22 @@ class PostgresRepository:
                 """
             )
             connection.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS last_error TEXT")
+            connection.execute("DROP INDEX IF EXISTS idx_documents_tenant_content_hash")
             connection.execute(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_tenant_content_hash
+                CREATE INDEX IF NOT EXISTS idx_documents_tenant_content_hash
                 ON documents(tenant_id, content_hash)
                 """
             )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_documents_tenant_source_ref
+                ON documents(tenant_id, source_connector, source_document_id, current)
+                """
+            )
+            connection.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_connector TEXT")
+            connection.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_document_id TEXT")
+            connection.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_document_version TEXT")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS document_chunks (
@@ -199,8 +212,25 @@ class PostgresRepository:
     def find_document_by_content_hash(self, tenant_id: str, content_hash: str) -> Optional[DocumentRecord]:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM documents WHERE tenant_id = %s AND content_hash = %s",
+                "SELECT * FROM documents WHERE tenant_id = %s AND content_hash = %s ORDER BY current DESC, version DESC",
                 (tenant_id, content_hash),
+            ).fetchone()
+        return self._row_to_document(row) if row else None
+
+    def find_current_document_by_source_ref(
+        self,
+        tenant_id: str,
+        source_connector: str,
+        source_document_id: str,
+    ) -> Optional[DocumentRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM documents
+                WHERE tenant_id = %s AND source_connector = %s AND source_document_id = %s AND current = TRUE
+                ORDER BY version DESC
+                """,
+                (tenant_id, source_connector, source_document_id),
             ).fetchone()
         return self._row_to_document(row) if row else None
 
@@ -209,6 +239,23 @@ class PostgresRepository:
             rows = connection.execute(
                 "SELECT * FROM documents WHERE tenant_id = %s AND title = %s ORDER BY version DESC",
                 (tenant_id, title),
+            ).fetchall()
+        return [self._row_to_document(row) for row in rows]
+
+    def list_documents_by_source_ref(
+        self,
+        tenant_id: str,
+        source_connector: str,
+        source_document_id: str,
+    ) -> list[DocumentRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM documents
+                WHERE tenant_id = %s AND source_connector = %s AND source_document_id = %s
+                ORDER BY version DESC
+                """,
+                (tenant_id, source_connector, source_document_id),
             ).fetchall()
         return [self._row_to_document(row) for row in rows]
 
@@ -222,14 +269,18 @@ class PostgresRepository:
             connection.execute(
                 """
                 INSERT INTO documents (
-                    id, tenant_id, title, source_type, source_uri, owner_id, department_scope, visibility_scope,
-                    security_level, version, status, last_error, content_hash, created_at, updated_at, tags, current
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    id, tenant_id, title, source_type, source_uri, source_connector, source_document_id, source_document_version,
+                    owner_id, department_scope, visibility_scope, security_level, version, status, last_error, content_hash,
+                    created_at, updated_at, tags, current
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     tenant_id = EXCLUDED.tenant_id,
                     title = EXCLUDED.title,
                     source_type = EXCLUDED.source_type,
                     source_uri = EXCLUDED.source_uri,
+                    source_connector = EXCLUDED.source_connector,
+                    source_document_id = EXCLUDED.source_document_id,
+                    source_document_version = EXCLUDED.source_document_version,
                     owner_id = EXCLUDED.owner_id,
                     department_scope = EXCLUDED.department_scope,
                     visibility_scope = EXCLUDED.visibility_scope,
@@ -249,6 +300,9 @@ class PostgresRepository:
                     document.title,
                     document.source_type,
                     document.source_uri,
+                    document.source_connector,
+                    document.source_document_id,
+                    document.source_document_version,
                     document.owner_id,
                     self._dump_json(document.department_scope),
                     self._dump_json(document.visibility_scope),
@@ -523,6 +577,9 @@ class PostgresRepository:
             title=row["title"],
             source_type=row["source_type"],
             source_uri=row["source_uri"],
+            source_connector=row.get("source_connector"),
+            source_document_id=row.get("source_document_id"),
+            source_document_version=row.get("source_document_version"),
             owner_id=row["owner_id"],
             department_scope=self._load_json(row["department_scope"]),
             visibility_scope=self._load_json(row["visibility_scope"]),

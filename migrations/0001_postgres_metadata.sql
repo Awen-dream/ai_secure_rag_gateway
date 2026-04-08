@@ -4,6 +4,9 @@ CREATE TABLE IF NOT EXISTS documents (
     title TEXT NOT NULL,
     source_type TEXT NOT NULL,
     source_uri TEXT,
+    source_connector TEXT,
+    source_document_id TEXT,
+    source_document_version TEXT,
     owner_id TEXT NOT NULL,
     department_scope JSONB NOT NULL,
     visibility_scope JSONB NOT NULL,
@@ -18,8 +21,11 @@ CREATE TABLE IF NOT EXISTS documents (
     current BOOLEAN NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_tenant_content_hash
+CREATE INDEX IF NOT EXISTS idx_documents_tenant_content_hash
 ON documents(tenant_id, content_hash);
+
+CREATE INDEX IF NOT EXISTS idx_documents_tenant_source_ref
+ON documents(tenant_id, source_connector, source_document_id, current);
 
 CREATE TABLE IF NOT EXISTS document_chunks (
     id TEXT PRIMARY KEY,

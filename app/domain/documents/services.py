@@ -71,11 +71,29 @@ class DocumentService:
 
         normalized_source_bytes = source_bytes if source_bytes else payload.content.strip().encode("utf-8")
         content_hash = hashlib.sha256(normalized_source_bytes).hexdigest()
-        existing_document = self.repository.find_document_by_content_hash(user.tenant_id, content_hash)
-        if existing_document:
-            return existing_document
+        source_connector = (payload.source_connector or "").strip() or None
+        source_document_id = (payload.source_document_id or "").strip() or None
+        source_document_version = (payload.source_document_version or "").strip() or None
 
-        previous_versions = self.repository.list_documents_by_title(user.tenant_id, payload.title)
+        if source_connector and source_document_id:
+            existing_document = self.repository.find_current_document_by_source_ref(
+                user.tenant_id,
+                source_connector,
+                source_document_id,
+            )
+            if existing_document and existing_document.content_hash == content_hash:
+                return existing_document
+            previous_versions = self.repository.list_documents_by_source_ref(
+                user.tenant_id,
+                source_connector,
+                source_document_id,
+            )
+        else:
+            existing_document = self.repository.find_document_by_content_hash(user.tenant_id, content_hash)
+            if existing_document:
+                return existing_document
+            previous_versions = self.repository.list_documents_by_title(user.tenant_id, payload.title)
+
         version = max((doc.version for doc in previous_versions), default=0) + 1
         now = utcnow()
 
@@ -85,6 +103,9 @@ class DocumentService:
             title=payload.title,
             source_type=payload.source_type,
             source_uri=payload.source_uri,
+            source_connector=source_connector,
+            source_document_id=source_document_id,
+            source_document_version=source_document_version,
             owner_id=payload.owner_id or user.user_id,
             department_scope=payload.department_scope or [user.department_id],
             visibility_scope=payload.visibility_scope,

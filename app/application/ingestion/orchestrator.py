@@ -66,11 +66,7 @@ class DocumentIngestionOrchestrator:
             self._update_document_status(document, DocumentStatus.EMBEDDING)
             self._update_document_status(document, DocumentStatus.INDEXING)
 
-            previous_ids = [
-                record.id
-                for record in self.repository.list_documents_by_title(document.tenant_id, document.title)
-                if record.id != document.id and record.current
-            ]
+            previous_ids = self._resolve_previous_ids(document)
 
             document.status = DocumentStatus.SUCCESS
             document.last_error = None
@@ -103,3 +99,15 @@ class DocumentIngestionOrchestrator:
         document.last_error = None
         document.updated_at = utcnow()
         self.repository.update_document(document)
+
+    def _resolve_previous_ids(self, document: DocumentRecord) -> list[str]:
+        if document.source_connector and document.source_document_id:
+            history = self.repository.list_documents_by_source_ref(
+                document.tenant_id,
+                document.source_connector,
+                document.source_document_id,
+            )
+        else:
+            history = self.repository.list_documents_by_title(document.tenant_id, document.title)
+
+        return [record.id for record in history if record.id != document.id and record.current]

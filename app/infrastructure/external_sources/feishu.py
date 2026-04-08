@@ -20,6 +20,9 @@ class FeishuDocumentContent:
     content: str
     source_type: str
     source_uri: str
+    connector: str = "feishu"
+    external_document_id: str = ""
+    external_version: str | None = None
 
 
 class FeishuClient:
@@ -86,6 +89,7 @@ class FeishuClient:
                 content=document["content"],
                 source_type="markdown",
                 source_uri=source,
+                external_document_id=resolved["obj_token"],
             )
 
         document = self.fetch_docx_document(reference.token, token)
@@ -94,6 +98,7 @@ class FeishuClient:
             content=document["content"],
             source_type="markdown",
             source_uri=source,
+            external_document_id=reference.token,
         )
 
     def health_check(self) -> dict:

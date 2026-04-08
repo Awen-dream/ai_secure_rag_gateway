@@ -5,7 +5,7 @@ from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.documents.schemas import DocumentUploadRequest
 from app.domain.documents.services import DocumentService
 from app.domain.sources.schemas import FeishuImportRequest, FeishuImportResponse
-from app.infrastructure.external_sources.feishu import FeishuClient
+from app.infrastructure.external_sources.base import ExternalSourceConnector
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue
 
 
@@ -14,7 +14,7 @@ class FeishuSourceSyncService:
 
     def __init__(
         self,
-        feishu_client: FeishuClient,
+        feishu_client: ExternalSourceConnector,
         document_service: DocumentService,
         task_queue: DocumentIngestionTaskQueue,
         ingestion_orchestrator: DocumentIngestionOrchestrator,
@@ -35,6 +35,9 @@ class FeishuSourceSyncService:
                 content=document_content.content,
                 source_type=document_content.source_type,
                 source_uri=document_content.source_uri,
+                source_connector=document_content.connector,
+                source_document_id=document_content.external_document_id,
+                source_document_version=document_content.external_version,
                 owner_id=payload.owner_id,
                 department_scope=payload.department_scope,
                 visibility_scope=payload.visibility_scope,

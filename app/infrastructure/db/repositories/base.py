@@ -15,7 +15,23 @@ class MetadataRepository(Protocol):
     def find_document_by_content_hash(self, tenant_id: str, content_hash: str) -> Optional[DocumentRecord]:
         ...
 
+    def find_current_document_by_source_ref(
+        self,
+        tenant_id: str,
+        source_connector: str,
+        source_document_id: str,
+    ) -> Optional[DocumentRecord]:
+        ...
+
     def list_documents_by_title(self, tenant_id: str, title: str) -> list[DocumentRecord]:
+        ...
+
+    def list_documents_by_source_ref(
+        self,
+        tenant_id: str,
+        source_connector: str,
+        source_document_id: str,
+    ) -> list[DocumentRecord]:
         ...
 
     def save_document(self, document: DocumentRecord, chunks: list[DocumentChunk], previous_ids: list[str]) -> None:

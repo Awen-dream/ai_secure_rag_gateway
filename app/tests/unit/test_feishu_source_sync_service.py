@@ -17,6 +17,9 @@ from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
 
 class _FakeFeishuClient:
+    def __init__(self) -> None:
+        self.content = "# 飞书报销制度\n\n审批时限为3个工作日。"
+
     def parse_source(self, source: str):
         from app.infrastructure.external_sources.feishu import FeishuSourceReference
 
@@ -27,9 +30,10 @@ class _FakeFeishuClient:
 
         return FeishuDocumentContent(
             title="飞书报销制度",
-            content="# 飞书报销制度\n\n审批时限为3个工作日。",
+            content=self.content,
             source_type="markdown",
             source_uri=source,
+            external_document_id="wiki_token",
         )
 
     def health_check(self) -> dict:
@@ -64,8 +68,9 @@ class FeishuSourceSyncServiceTest(unittest.TestCase):
         self.repository = repository
         self.orchestrator = orchestrator
         self.task_queue = task_queue
+        self.feishu_client = _FakeFeishuClient()
         self.service = FeishuSourceSyncService(
-            feishu_client=_FakeFeishuClient(),
+            feishu_client=self.feishu_client,
             document_service=document_service,
             task_queue=task_queue,
             ingestion_orchestrator=orchestrator,
@@ -113,6 +118,58 @@ class FeishuSourceSyncServiceTest(unittest.TestCase):
         self.assertIsNotNone(document)
         self.assertEqual(document.status.value, "success")
         self.assertGreaterEqual(len(self.repository.list_chunks_for_document(response.document_id)), 1)
+        self.assertEqual(document.source_connector, "feishu")
+        self.assertEqual(document.source_document_id, "wiki_token")
+
+    def test_repeated_sync_of_same_external_document_reuses_current_version(self) -> None:
+        first = self.service.import_source(
+            FeishuImportRequest(
+                source="https://example.feishu.cn/wiki/wiki_token",
+                department_scope=["finance"],
+                async_mode=False,
+            ),
+            self.user,
+        )
+        second = self.service.import_source(
+            FeishuImportRequest(
+                source="https://example.feishu.cn/wiki/wiki_token",
+                department_scope=["finance"],
+                async_mode=False,
+            ),
+            self.user,
+        )
+
+        self.assertEqual(first.document_id, second.document_id)
+        history = self.repository.list_documents_by_source_ref("t1", "feishu", "wiki_token")
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0].version, 1)
+
+    def test_changed_external_document_content_creates_new_version(self) -> None:
+        first = self.service.import_source(
+            FeishuImportRequest(
+                source="https://example.feishu.cn/wiki/wiki_token",
+                department_scope=["finance"],
+                async_mode=False,
+            ),
+            self.user,
+        )
+
+        self.feishu_client.content = "# 飞书报销制度\n\n审批时限为5个工作日。"
+        second = self.service.import_source(
+            FeishuImportRequest(
+                source="https://example.feishu.cn/wiki/wiki_token",
+                department_scope=["finance"],
+                async_mode=False,
+            ),
+            self.user,
+        )
+
+        self.assertNotEqual(first.document_id, second.document_id)
+        history = self.repository.list_documents_by_source_ref("t1", "feishu", "wiki_token")
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0].version, 2)
+        self.assertTrue(history[0].current)
+        self.assertFalse(history[1].current)
 
 
 if __name__ == "__main__":

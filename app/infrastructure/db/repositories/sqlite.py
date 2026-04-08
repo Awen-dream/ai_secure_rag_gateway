@@ -40,6 +40,9 @@ class SQLiteRepository:
                     title TEXT NOT NULL,
                     source_type TEXT NOT NULL,
                     source_uri TEXT,
+                    source_connector TEXT,
+                    source_document_id TEXT,
+                    source_document_version TEXT,
                     owner_id TEXT NOT NULL,
                     department_scope TEXT NOT NULL,
                     visibility_scope TEXT NOT NULL,
@@ -53,10 +56,6 @@ class SQLiteRepository:
                     tags TEXT NOT NULL,
                     current INTEGER NOT NULL
                 );
-
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_tenant_content_hash
-                ON documents(tenant_id, content_hash);
-
                 CREATE TABLE IF NOT EXISTS document_chunks (
                     id TEXT PRIMARY KEY,
                     doc_id TEXT NOT NULL,
@@ -136,11 +135,27 @@ class SQLiteRepository:
                 );
                 """
             )
+            connection.execute("DROP INDEX IF EXISTS idx_documents_tenant_content_hash")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_documents_tenant_content_hash ON documents(tenant_id, content_hash)"
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_documents_tenant_source_ref
+                ON documents(tenant_id, source_connector, source_document_id, current)
+                """
+            )
             existing_document_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(documents)").fetchall()
             }
             if "last_error" not in existing_document_columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN last_error TEXT")
+            if "source_connector" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN source_connector TEXT")
+            if "source_document_id" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN source_document_id TEXT")
+            if "source_document_version" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN source_document_version TEXT")
             existing_session_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(chat_sessions)").fetchall()
             }
@@ -177,8 +192,25 @@ class SQLiteRepository:
     def find_document_by_content_hash(self, tenant_id: str, content_hash: str) -> Optional[DocumentRecord]:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM documents WHERE tenant_id = ? AND content_hash = ?",
+                "SELECT * FROM documents WHERE tenant_id = ? AND content_hash = ? ORDER BY current DESC, version DESC",
                 (tenant_id, content_hash),
+            ).fetchone()
+        return self._row_to_document(row) if row else None
+
+    def find_current_document_by_source_ref(
+        self,
+        tenant_id: str,
+        source_connector: str,
+        source_document_id: str,
+    ) -> Optional[DocumentRecord]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM documents
+                WHERE tenant_id = ? AND source_connector = ? AND source_document_id = ? AND current = 1
+                ORDER BY version DESC
+                """,
+                (tenant_id, source_connector, source_document_id),
             ).fetchone()
         return self._row_to_document(row) if row else None
 
@@ -190,6 +222,23 @@ class SQLiteRepository:
             ).fetchall()
         return [self._row_to_document(row) for row in rows]
 
+    def list_documents_by_source_ref(
+        self,
+        tenant_id: str,
+        source_connector: str,
+        source_document_id: str,
+    ) -> list[DocumentRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM documents
+                WHERE tenant_id = ? AND source_connector = ? AND source_document_id = ?
+                ORDER BY version DESC
+                """,
+                (tenant_id, source_connector, source_document_id),
+            ).fetchall()
+        return [self._row_to_document(row) for row in rows]
+
     def save_document(self, document: DocumentRecord, chunks: list[DocumentChunk], previous_ids: list[str]) -> None:
         with self._connect() as connection:
             if previous_ids:
@@ -197,9 +246,10 @@ class SQLiteRepository:
             connection.execute(
                 """
                 INSERT OR REPLACE INTO documents (
-                    id, tenant_id, title, source_type, source_uri, owner_id, department_scope, visibility_scope,
-                    security_level, version, status, last_error, content_hash, created_at, updated_at, tags, current
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, tenant_id, title, source_type, source_uri, source_connector, source_document_id, source_document_version,
+                    owner_id, department_scope, visibility_scope, security_level, version, status, last_error, content_hash,
+                    created_at, updated_at, tags, current
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document.id,
@@ -207,6 +257,9 @@ class SQLiteRepository:
                     document.title,
                     document.source_type,
                     document.source_uri,
+                    document.source_connector,
+                    document.source_document_id,
+                    document.source_document_version,
                     document.owner_id,
                     self._dump_json(document.department_scope),
                     self._dump_json(document.visibility_scope),
@@ -458,6 +511,9 @@ class SQLiteRepository:
             title=row["title"],
             source_type=row["source_type"],
             source_uri=row["source_uri"],
+            source_connector=row["source_connector"],
+            source_document_id=row["source_document_id"],
+            source_document_version=row["source_document_version"],
             owner_id=row["owner_id"],
             department_scope=self._load_json(row["department_scope"]),
             visibility_scope=self._load_json(row["visibility_scope"]),
