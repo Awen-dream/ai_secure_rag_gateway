@@ -89,7 +89,63 @@ class FeishuListSourcesResponse(BaseModel):
     items: List[FeishuListSourceItemResponse] = Field(default_factory=list)
 
 
+class FeishuSyncJobUpsertRequest(BaseModel):
+    job_id: Optional[str] = None
+    name: str
+    source_root: Optional[str] = None
+    space_id: Optional[str] = None
+    parent_node_token: Optional[str] = None
+    cursor: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=200)
+    continue_on_error: bool = True
+    default_owner_id: Optional[str] = None
+    default_department_scope: List[str] = Field(default_factory=list)
+    default_visibility_scope: List[str] = Field(default_factory=lambda: ["tenant"])
+    default_security_level: int = Field(default=1, ge=0, le=10)
+    default_tags: List[str] = Field(default_factory=list)
+    default_async_mode: bool = True
+    enabled: bool = True
+
+
+class FeishuSyncJobResponse(BaseModel):
+    job_id: str
+    provider: str
+    name: str
+    source_root: Optional[str] = None
+    space_id: Optional[str] = None
+    parent_node_token: Optional[str] = None
+    cursor: Optional[str] = None
+    limit: int
+    continue_on_error: bool
+    default_owner_id: Optional[str] = None
+    default_department_scope: List[str] = Field(default_factory=list)
+    default_visibility_scope: List[str] = Field(default_factory=list)
+    default_security_level: int
+    default_tags: List[str] = Field(default_factory=list)
+    default_async_mode: bool
+    enabled: bool
+    status: str
+    last_error: Optional[str] = None
+    run_count: int
+    success_count: int
+    failure_count: int
+    last_run_id: Optional[str] = None
+    last_run_status: Optional[str] = None
+    last_run_at: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class FeishuRunJobsResponse(BaseModel):
+    total_jobs: int
+    succeeded_jobs: int
+    failed_jobs: int
+    skipped_jobs: int
+    items: List[FeishuBatchSyncResponse] = Field(default_factory=list)
+
+
 class FeishuBatchSyncResponse(BaseModel):
+    run_id: Optional[str] = None
     total: int
     listed_count: int
     succeeded: int

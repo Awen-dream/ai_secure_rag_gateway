@@ -257,6 +257,105 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["next_cursor"], "1")
         self.assertEqual(payload["items"][0]["source_kind"], "wiki")
 
+    def test_admin_can_create_and_list_feishu_sync_jobs(self) -> None:
+        create_response = self.client.post(
+            "/api/v1/admin/sources/feishu/jobs",
+            json={
+                "name": "finance wiki",
+                "source_root": "https://example.feishu.cn/wiki/root_node",
+                "limit": 2,
+                "default_department_scope": ["engineering"],
+                "default_async_mode": True,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_response.status_code, 200)
+        created = create_response.json()
+        self.assertEqual(created["name"], "finance wiki")
+
+        list_response = self.client.get("/api/v1/admin/sources/feishu/jobs", headers=self.headers)
+        self.assertEqual(list_response.status_code, 200)
+        payload = list_response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["job_id"], created["job_id"])
+        self.assertEqual(payload[0]["source_root"], "https://example.feishu.cn/wiki/root_node")
+
+    def test_admin_can_run_feishu_sync_job_and_advance_cursor(self) -> None:
+        fake_client = _FakeFeishuClient()
+        fake_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+            "https://example.feishu.cn/wiki/wiki_token_2",
+            "https://example.feishu.cn/wiki/wiki_token_3",
+        ]
+        self.get_feishu_source_sync_service().feishu_client = fake_client
+
+        create_response = self.client.post(
+            "/api/v1/admin/sources/feishu/jobs",
+            json={
+                "name": "finance wiki",
+                "source_root": "https://example.feishu.cn/wiki/root_node",
+                "limit": 2,
+                "default_department_scope": ["engineering"],
+                "default_async_mode": True,
+            },
+            headers=self.headers,
+        )
+        job_id = create_response.json()["job_id"]
+
+        run_response = self.client.post(f"/api/v1/admin/sources/feishu/jobs/{job_id}/run", headers=self.headers)
+        self.assertEqual(run_response.status_code, 200)
+        run_payload = run_response.json()
+        self.assertEqual(run_payload["listed_count"], 2)
+        self.assertEqual(run_payload["next_cursor"], "2")
+        self.assertIsNotNone(run_payload["run_id"])
+
+        jobs_response = self.client.get("/api/v1/admin/sources/feishu/jobs", headers=self.headers)
+        jobs_payload = jobs_response.json()
+        self.assertEqual(jobs_payload[0]["cursor"], "2")
+        self.assertEqual(jobs_payload[0]["last_run_status"], "success")
+        self.assertEqual(jobs_payload[0]["status"], "idle")
+        self.assertEqual(jobs_payload[0]["run_count"], 1)
+
+    def test_admin_can_run_enabled_feishu_sync_jobs(self) -> None:
+        fake_client = _FakeFeishuClient()
+        fake_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+        ]
+        self.get_feishu_source_sync_service().feishu_client = fake_client
+
+        self.client.post(
+            "/api/v1/admin/sources/feishu/jobs",
+            json={
+                "name": "enabled job",
+                "source_root": "https://example.feishu.cn/wiki/root_node",
+                "limit": 1,
+                "default_department_scope": ["engineering"],
+                "default_async_mode": True,
+                "enabled": True,
+            },
+            headers=self.headers,
+        )
+        self.client.post(
+            "/api/v1/admin/sources/feishu/jobs",
+            json={
+                "name": "disabled job",
+                "source_root": "https://example.feishu.cn/wiki/root_node",
+                "limit": 1,
+                "default_department_scope": ["engineering"],
+                "default_async_mode": True,
+                "enabled": False,
+            },
+            headers=self.headers,
+        )
+
+        response = self.client.post("/api/v1/admin/sources/feishu/jobs/run-enabled", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total_jobs"], 2)
+        self.assertEqual(payload["succeeded_jobs"], 1)
+        self.assertEqual(payload["failed_jobs"], 0)
+        self.assertEqual(payload["skipped_jobs"], 1)
+
     def test_admin_can_view_feishu_sync_runs(self) -> None:
         self.get_feishu_source_sync_service().feishu_client = _FakeFeishuClient()
         self.client.post(

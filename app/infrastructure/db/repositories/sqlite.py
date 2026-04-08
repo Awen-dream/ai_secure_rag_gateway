@@ -12,7 +12,7 @@ from app.domain.chat.models import ChatMessage, ChatSession
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.prompts.models import PromptTemplate
 from app.domain.risk.models import PolicyDefinition
-from app.domain.sources.models import SourceSyncRun
+from app.domain.sources.models import SourceSyncJob, SourceSyncRun
 
 
 class SQLiteRepository:
@@ -154,6 +154,37 @@ class SQLiteRepository:
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS source_sync_jobs (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    source_root TEXT,
+                    space_id TEXT,
+                    parent_node_token TEXT,
+                    cursor TEXT,
+                    limit_value INTEGER NOT NULL,
+                    continue_on_error INTEGER NOT NULL,
+                    default_owner_id TEXT,
+                    default_department_scope TEXT NOT NULL,
+                    default_visibility_scope TEXT NOT NULL,
+                    default_security_level INTEGER NOT NULL,
+                    default_tags TEXT NOT NULL,
+                    default_async_mode INTEGER NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'idle',
+                    last_error TEXT,
+                    run_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    last_run_id TEXT,
+                    last_run_status TEXT,
+                    last_run_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             connection.execute("DROP INDEX IF EXISTS idx_documents_tenant_content_hash")
@@ -177,6 +208,19 @@ class SQLiteRepository:
                 connection.execute("ALTER TABLE documents ADD COLUMN source_document_id TEXT")
             if "source_document_version" not in existing_document_columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN source_document_version TEXT")
+            existing_sync_job_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(source_sync_jobs)").fetchall()
+            }
+            if "status" not in existing_sync_job_columns:
+                connection.execute("ALTER TABLE source_sync_jobs ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'")
+            if "last_error" not in existing_sync_job_columns:
+                connection.execute("ALTER TABLE source_sync_jobs ADD COLUMN last_error TEXT")
+            if "run_count" not in existing_sync_job_columns:
+                connection.execute("ALTER TABLE source_sync_jobs ADD COLUMN run_count INTEGER NOT NULL DEFAULT 0")
+            if "success_count" not in existing_sync_job_columns:
+                connection.execute("ALTER TABLE source_sync_jobs ADD COLUMN success_count INTEGER NOT NULL DEFAULT 0")
+            if "failure_count" not in existing_sync_job_columns:
+                connection.execute("ALTER TABLE source_sync_jobs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0")
             existing_session_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(chat_sessions)").fetchall()
             }
@@ -567,6 +611,72 @@ class SQLiteRepository:
             ).fetchall()
         return [self._row_to_source_sync_run(row) for row in rows]
 
+    def save_source_sync_job(self, job: SourceSyncJob) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO source_sync_jobs (
+                    id, tenant_id, provider, name, created_by, source_root, space_id, parent_node_token, cursor,
+                    limit_value, continue_on_error, default_owner_id, default_department_scope, default_visibility_scope,
+                    default_security_level, default_tags, default_async_mode, enabled, status, last_error, run_count,
+                    success_count, failure_count, last_run_id, last_run_status, last_run_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job.id,
+                    job.tenant_id,
+                    job.provider,
+                    job.name,
+                    job.created_by,
+                    job.source_root,
+                    job.space_id,
+                    job.parent_node_token,
+                    job.cursor,
+                    job.limit,
+                    int(job.continue_on_error),
+                    job.default_owner_id,
+                    self._dump_json(job.default_department_scope),
+                    self._dump_json(job.default_visibility_scope),
+                    job.default_security_level,
+                    self._dump_json(job.default_tags),
+                    int(job.default_async_mode),
+                    int(job.enabled),
+                    job.status,
+                    job.last_error,
+                    job.run_count,
+                    job.success_count,
+                    job.failure_count,
+                    job.last_run_id,
+                    job.last_run_status,
+                    job.last_run_at.isoformat() if job.last_run_at else None,
+                    job.created_at.isoformat(),
+                    job.updated_at.isoformat(),
+                ),
+            )
+
+    def get_source_sync_job(self, tenant_id: str, provider: str, job_id: str) -> Optional[SourceSyncJob]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM source_sync_jobs
+                WHERE tenant_id = ? AND provider = ? AND id = ?
+                """,
+                (tenant_id, provider, job_id),
+            ).fetchone()
+        return self._row_to_source_sync_job(row) if row else None
+
+    def list_source_sync_jobs(self, tenant_id: str, provider: str) -> list[SourceSyncJob]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_sync_jobs
+                WHERE tenant_id = ? AND provider = ?
+                ORDER BY created_at DESC
+                """,
+                (tenant_id, provider),
+            ).fetchall()
+        return [self._row_to_source_sync_job(row) for row in rows]
+
     def _row_to_document(self, row: sqlite3.Row) -> DocumentRecord:
         return DocumentRecord(
             id=row["id"],
@@ -694,4 +804,36 @@ class SQLiteRepository:
             queued=row["queued"],
             status=row["status"],
             created_at=self._to_datetime(row["created_at"]),
+        )
+
+    def _row_to_source_sync_job(self, row: sqlite3.Row) -> SourceSyncJob:
+        return SourceSyncJob(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            provider=row["provider"],
+            name=row["name"],
+            created_by=row["created_by"],
+            source_root=row["source_root"],
+            space_id=row["space_id"],
+            parent_node_token=row["parent_node_token"],
+            cursor=row["cursor"],
+            limit=row["limit_value"],
+            continue_on_error=bool(row["continue_on_error"]),
+            default_owner_id=row["default_owner_id"],
+            default_department_scope=self._load_json(row["default_department_scope"]),
+            default_visibility_scope=self._load_json(row["default_visibility_scope"]),
+            default_security_level=row["default_security_level"],
+            default_tags=self._load_json(row["default_tags"]),
+            default_async_mode=bool(row["default_async_mode"]),
+            enabled=bool(row["enabled"]),
+            status=row["status"],
+            last_error=row["last_error"],
+            run_count=row["run_count"],
+            success_count=row["success_count"],
+            failure_count=row["failure_count"],
+            last_run_id=row["last_run_id"],
+            last_run_status=row["last_run_status"],
+            last_run_at=self._to_datetime(row["last_run_at"]) if row["last_run_at"] else None,
+            created_at=self._to_datetime(row["created_at"]),
+            updated_at=self._to_datetime(row["updated_at"]),
         )

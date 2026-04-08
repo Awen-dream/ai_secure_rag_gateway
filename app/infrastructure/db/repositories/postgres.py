@@ -13,7 +13,7 @@ from app.domain.chat.models import ChatMessage, ChatSession
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.prompts.models import PromptTemplate
 from app.domain.risk.models import PolicyDefinition
-from app.domain.sources.models import SourceSyncRun
+from app.domain.sources.models import SourceSyncJob, SourceSyncRun
 
 
 class PostgresRepository:
@@ -200,6 +200,40 @@ class PostgresRepository:
                     queued INTEGER NOT NULL,
                     status TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_sync_jobs (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    source_root TEXT,
+                    space_id TEXT,
+                    parent_node_token TEXT,
+                    cursor TEXT,
+                    limit_value INTEGER NOT NULL,
+                    continue_on_error BOOLEAN NOT NULL,
+                    default_owner_id TEXT,
+                    default_department_scope JSONB NOT NULL,
+                    default_visibility_scope JSONB NOT NULL,
+                    default_security_level INTEGER NOT NULL,
+                    default_tags JSONB NOT NULL,
+                    default_async_mode BOOLEAN NOT NULL,
+                    enabled BOOLEAN NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'idle',
+                    last_error TEXT,
+                    run_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    last_run_id TEXT,
+                    last_run_status TEXT,
+                    last_run_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL
                 )
                 """
             )
@@ -636,6 +670,101 @@ class PostgresRepository:
             ).fetchall()
         return [self._row_to_source_sync_run(row) for row in rows]
 
+    def save_source_sync_job(self, job: SourceSyncJob) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO source_sync_jobs (
+                    id, tenant_id, provider, name, created_by, source_root, space_id, parent_node_token, cursor,
+                    limit_value, continue_on_error, default_owner_id, default_department_scope, default_visibility_scope,
+                    default_security_level, default_tags, default_async_mode, enabled, status, last_error, run_count,
+                    success_count, failure_count, last_run_id, last_run_status, last_run_at, created_at, updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    tenant_id = EXCLUDED.tenant_id,
+                    provider = EXCLUDED.provider,
+                    name = EXCLUDED.name,
+                    created_by = EXCLUDED.created_by,
+                    source_root = EXCLUDED.source_root,
+                    space_id = EXCLUDED.space_id,
+                    parent_node_token = EXCLUDED.parent_node_token,
+                    cursor = EXCLUDED.cursor,
+                    limit_value = EXCLUDED.limit_value,
+                    continue_on_error = EXCLUDED.continue_on_error,
+                    default_owner_id = EXCLUDED.default_owner_id,
+                    default_department_scope = EXCLUDED.default_department_scope,
+                    default_visibility_scope = EXCLUDED.default_visibility_scope,
+                    default_security_level = EXCLUDED.default_security_level,
+                    default_tags = EXCLUDED.default_tags,
+                    default_async_mode = EXCLUDED.default_async_mode,
+                    enabled = EXCLUDED.enabled,
+                    status = EXCLUDED.status,
+                    last_error = EXCLUDED.last_error,
+                    run_count = EXCLUDED.run_count,
+                    success_count = EXCLUDED.success_count,
+                    failure_count = EXCLUDED.failure_count,
+                    last_run_id = EXCLUDED.last_run_id,
+                    last_run_status = EXCLUDED.last_run_status,
+                    last_run_at = EXCLUDED.last_run_at,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    job.id,
+                    job.tenant_id,
+                    job.provider,
+                    job.name,
+                    job.created_by,
+                    job.source_root,
+                    job.space_id,
+                    job.parent_node_token,
+                    job.cursor,
+                    job.limit,
+                    job.continue_on_error,
+                    job.default_owner_id,
+                    self._dump_json(job.default_department_scope),
+                    self._dump_json(job.default_visibility_scope),
+                    job.default_security_level,
+                    self._dump_json(job.default_tags),
+                    job.default_async_mode,
+                    job.enabled,
+                    job.status,
+                    job.last_error,
+                    job.run_count,
+                    job.success_count,
+                    job.failure_count,
+                    job.last_run_id,
+                    job.last_run_status,
+                    job.last_run_at,
+                    job.created_at,
+                    job.updated_at,
+                ),
+            )
+
+    def get_source_sync_job(self, tenant_id: str, provider: str, job_id: str) -> Optional[SourceSyncJob]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM source_sync_jobs
+                WHERE tenant_id = %s AND provider = %s AND id = %s
+                """,
+                (tenant_id, provider, job_id),
+            ).fetchone()
+        return self._row_to_source_sync_job(row) if row else None
+
+    def list_source_sync_jobs(self, tenant_id: str, provider: str) -> list[SourceSyncJob]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_sync_jobs
+                WHERE tenant_id = %s AND provider = %s
+                ORDER BY created_at DESC
+                """,
+                (tenant_id, provider),
+            ).fetchall()
+        return [self._row_to_source_sync_job(row) for row in rows]
+
     def _row_to_document(self, row: dict) -> DocumentRecord:
         return DocumentRecord(
             id=row["id"],
@@ -763,4 +892,36 @@ class PostgresRepository:
             queued=row["queued"],
             status=row["status"],
             created_at=self._to_datetime(row["created_at"]),
+        )
+
+    def _row_to_source_sync_job(self, row: dict) -> SourceSyncJob:
+        return SourceSyncJob(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            provider=row["provider"],
+            name=row["name"],
+            created_by=row["created_by"],
+            source_root=row.get("source_root"),
+            space_id=row.get("space_id"),
+            parent_node_token=row.get("parent_node_token"),
+            cursor=row.get("cursor"),
+            limit=row["limit_value"],
+            continue_on_error=bool(row["continue_on_error"]),
+            default_owner_id=row.get("default_owner_id"),
+            default_department_scope=self._load_json(row["default_department_scope"]),
+            default_visibility_scope=self._load_json(row["default_visibility_scope"]),
+            default_security_level=row["default_security_level"],
+            default_tags=self._load_json(row["default_tags"]),
+            default_async_mode=bool(row["default_async_mode"]),
+            enabled=bool(row["enabled"]),
+            status=row["status"],
+            last_error=row.get("last_error"),
+            run_count=row["run_count"],
+            success_count=row["success_count"],
+            failure_count=row["failure_count"],
+            last_run_id=row.get("last_run_id"),
+            last_run_status=row.get("last_run_status"),
+            last_run_at=self._to_datetime(row["last_run_at"]) if row.get("last_run_at") else None,
+            created_at=self._to_datetime(row["created_at"]),
+            updated_at=self._to_datetime(row["updated_at"]),
         )

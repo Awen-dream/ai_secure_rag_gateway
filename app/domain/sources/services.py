@@ -7,7 +7,7 @@ from app.domain.auth.models import UserContext
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.documents.schemas import DocumentUploadRequest
 from app.domain.documents.services import DocumentService
-from app.domain.sources.models import SourceSyncRun
+from app.domain.sources.models import SourceSyncJob, SourceSyncRun
 from app.domain.sources.schemas import (
     FeishuBatchSyncItemResponse,
     FeishuBatchSyncRequest,
@@ -17,6 +17,9 @@ from app.domain.sources.schemas import (
     FeishuListSourceItemResponse,
     FeishuListSourcesRequest,
     FeishuListSourcesResponse,
+    FeishuRunJobsResponse,
+    FeishuSyncJobResponse,
+    FeishuSyncJobUpsertRequest,
     SourceSyncAction,
 )
 from app.infrastructure.external_sources.base import ExternalSourceConnector, ExternalSourceItem
@@ -90,7 +93,14 @@ class FeishuSourceSyncService:
             task_id=task_receipt["task_id"] if task_receipt else None,
         )
 
-    def sync_sources(self, payload: FeishuBatchSyncRequest, user: UserContext) -> FeishuBatchSyncResponse:
+    def sync_sources(
+        self,
+        payload: FeishuBatchSyncRequest,
+        user: UserContext,
+        *,
+        mode: str = "manual",
+        job_id: str | None = None,
+    ) -> FeishuBatchSyncResponse:
         """Synchronize multiple Feishu sources and return item-level outcomes plus aggregate stats."""
 
         items_to_sync, listed_count, next_cursor = self._resolve_sync_items(payload)
@@ -124,6 +134,7 @@ class FeishuSourceSyncService:
                     break
 
         summary = FeishuBatchSyncResponse(
+            run_id=None,
             total=len(results),
             listed_count=listed_count,
             succeeded=sum(1 for item in results if item.success),
@@ -135,13 +146,14 @@ class FeishuSourceSyncService:
             next_cursor=next_cursor,
             items=results,
         )
+        run_id = f"sync_run_{uuid.uuid4().hex[:12]}"
         self.repository.append_source_sync_run(
             SourceSyncRun(
-                id=f"sync_run_{uuid.uuid4().hex[:12]}",
+                id=run_id,
                 tenant_id=user.tenant_id,
                 provider=self.feishu_client.provider,
                 triggered_by=user.user_id,
-                mode="manual",
+                mode=mode,
                 continue_on_error=payload.continue_on_error,
                 request_json={
                     "sources": [item.source for item in items_to_sync],
@@ -152,6 +164,7 @@ class FeishuSourceSyncService:
                     "source_root": payload.source_root,
                     "space_id": payload.space_id,
                     "parent_node_token": payload.parent_node_token,
+                    "job_id": job_id,
                 },
                 result_items_json=[item.model_dump() for item in results],
                 total=summary.total,
@@ -165,12 +178,153 @@ class FeishuSourceSyncService:
                 created_at=utcnow(),
             )
         )
+        summary.run_id = run_id
         return summary
 
     def list_sync_runs(self, user: UserContext) -> list[SourceSyncRun]:
         """Return persisted sync runs for the current tenant and connector."""
 
         return self.repository.list_source_sync_runs(user.tenant_id, self.feishu_client.provider)
+
+    def upsert_sync_job(self, payload: FeishuSyncJobUpsertRequest, user: UserContext) -> FeishuSyncJobResponse:
+        """Create or update one Feishu sync job and persist its cursor for resumable runs."""
+
+        if not payload.source_root and not payload.space_id:
+            raise ValueError("Feishu sync job requires source_root or space_id.")
+
+        existing = None
+        if payload.job_id:
+            existing = self.repository.get_source_sync_job(user.tenant_id, self.feishu_client.provider, payload.job_id)
+
+        now = utcnow()
+        job = SourceSyncJob(
+            id=existing.id if existing else (payload.job_id or f"sync_job_{uuid.uuid4().hex[:12]}"),
+            tenant_id=user.tenant_id,
+            provider=self.feishu_client.provider,
+            name=payload.name,
+            created_by=existing.created_by if existing else user.user_id,
+            source_root=payload.source_root,
+            space_id=payload.space_id,
+            parent_node_token=payload.parent_node_token,
+            cursor=payload.cursor if payload.cursor is not None else (existing.cursor if existing else None),
+            limit=payload.limit,
+            continue_on_error=payload.continue_on_error,
+            default_owner_id=payload.default_owner_id,
+            default_department_scope=list(payload.default_department_scope),
+            default_visibility_scope=list(payload.default_visibility_scope),
+            default_security_level=payload.default_security_level,
+            default_tags=list(payload.default_tags),
+            default_async_mode=payload.default_async_mode,
+            enabled=payload.enabled,
+            status=("disabled" if not payload.enabled else (existing.status if existing else "idle")),
+            last_error=existing.last_error if existing else None,
+            run_count=existing.run_count if existing else 0,
+            success_count=existing.success_count if existing else 0,
+            failure_count=existing.failure_count if existing else 0,
+            last_run_id=existing.last_run_id if existing else None,
+            last_run_status=existing.last_run_status if existing else None,
+            last_run_at=existing.last_run_at if existing else None,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+        self.repository.save_source_sync_job(job)
+        return self._to_sync_job_response(job)
+
+    def list_sync_jobs(self, user: UserContext) -> list[FeishuSyncJobResponse]:
+        """Return persisted Feishu sync jobs for the current tenant."""
+
+        return [
+            self._to_sync_job_response(job)
+            for job in self.repository.list_source_sync_jobs(user.tenant_id, self.feishu_client.provider)
+        ]
+
+    def run_sync_job(self, job_id: str, user: UserContext) -> FeishuBatchSyncResponse:
+        """Execute one saved sync job using its persisted cursor and update the checkpoint."""
+
+        job = self.repository.get_source_sync_job(user.tenant_id, self.feishu_client.provider, job_id)
+        if not job:
+            raise KeyError(job_id)
+        if not job.enabled:
+            raise ValueError(f"Feishu sync job {job_id} is disabled.")
+
+        job.status = "running"
+        job.last_error = None
+        job.updated_at = utcnow()
+        self.repository.save_source_sync_job(job)
+
+        try:
+            summary = self.sync_sources(
+                FeishuBatchSyncRequest(
+                    source_root=job.source_root,
+                    space_id=job.space_id,
+                    parent_node_token=job.parent_node_token,
+                    cursor=job.cursor,
+                    limit=job.limit,
+                    continue_on_error=job.continue_on_error,
+                    default_owner_id=job.default_owner_id,
+                    default_department_scope=list(job.default_department_scope),
+                    default_visibility_scope=list(job.default_visibility_scope),
+                    default_security_level=job.default_security_level,
+                    default_tags=list(job.default_tags),
+                    default_async_mode=job.default_async_mode,
+                ),
+                user,
+                mode="job",
+                job_id=job.id,
+            )
+        except Exception as exc:
+            job.status = "failed"
+            job.last_error = str(exc)
+            job.run_count += 1
+            job.failure_count += 1
+            job.last_run_status = "failed"
+            job.last_run_at = utcnow()
+            job.updated_at = job.last_run_at
+            self.repository.save_source_sync_job(job)
+            raise
+
+        resolved_status = self._resolve_run_status(summary)
+        job.cursor = summary.next_cursor
+        job.status = self._resolve_job_status(job.enabled, resolved_status)
+        job.last_error = None if resolved_status != "failed" else "sync job failed"
+        job.run_count += 1
+        if resolved_status in {"success", "partial_success", "empty"}:
+            job.success_count += 1
+        else:
+            job.failure_count += 1
+        job.last_run_id = summary.run_id
+        job.last_run_status = resolved_status
+        job.last_run_at = utcnow()
+        job.updated_at = job.last_run_at
+        self.repository.save_source_sync_job(job)
+        return summary
+
+    def run_enabled_sync_jobs(self, user: UserContext) -> FeishuRunJobsResponse:
+        """Run every enabled Feishu sync job once so external schedulers have a single entrypoint."""
+
+        items: list[FeishuBatchSyncResponse] = []
+        failed_jobs = 0
+        skipped_jobs = 0
+        jobs = self.repository.list_source_sync_jobs(user.tenant_id, self.feishu_client.provider)
+        for job in jobs:
+            if not job.enabled:
+                skipped_jobs += 1
+                continue
+            if job.status == "running":
+                skipped_jobs += 1
+                continue
+            try:
+                items.append(self.run_sync_job(job.id, user))
+            except Exception:
+                failed_jobs += 1
+
+        return FeishuRunJobsResponse(
+            total_jobs=len(jobs),
+            succeeded_jobs=len(items),
+            failed_jobs=failed_jobs,
+            skipped_jobs=skipped_jobs,
+            items=items,
+        )
 
     def list_sources(self, payload: FeishuListSourcesRequest) -> FeishuListSourcesResponse:
         """List Feishu spaces or nodes for admin exploration and sync preparation."""
@@ -259,3 +413,42 @@ class FeishuSourceSyncService:
             obj_type=item.obj_type,
             has_child=item.has_child,
         )
+
+    @staticmethod
+    def _to_sync_job_response(job: SourceSyncJob) -> FeishuSyncJobResponse:
+        return FeishuSyncJobResponse(
+            job_id=job.id,
+            provider=job.provider,
+            name=job.name,
+            source_root=job.source_root,
+            space_id=job.space_id,
+            parent_node_token=job.parent_node_token,
+            cursor=job.cursor,
+            limit=job.limit,
+            continue_on_error=job.continue_on_error,
+            default_owner_id=job.default_owner_id,
+            default_department_scope=list(job.default_department_scope),
+            default_visibility_scope=list(job.default_visibility_scope),
+            default_security_level=job.default_security_level,
+            default_tags=list(job.default_tags),
+            default_async_mode=job.default_async_mode,
+            enabled=job.enabled,
+            status=job.status,
+            last_error=job.last_error,
+            run_count=job.run_count,
+            success_count=job.success_count,
+            failure_count=job.failure_count,
+            last_run_id=job.last_run_id,
+            last_run_status=job.last_run_status,
+            last_run_at=job.last_run_at.isoformat() if job.last_run_at else None,
+            created_at=job.created_at.isoformat(),
+            updated_at=job.updated_at.isoformat(),
+        )
+
+    @staticmethod
+    def _resolve_job_status(enabled: bool, run_status: str) -> str:
+        if not enabled:
+            return "disabled"
+        if run_status == "failed":
+            return "failed"
+        return "idle"

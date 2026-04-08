@@ -45,6 +45,9 @@ from app.domain.sources.schemas import (
     FeishuImportResponse,
     FeishuListSourcesRequest,
     FeishuListSourcesResponse,
+    FeishuRunJobsResponse,
+    FeishuSyncJobResponse,
+    FeishuSyncJobUpsertRequest,
 )
 from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
@@ -290,6 +293,48 @@ def list_feishu_sources(
     """List Feishu spaces or child wiki nodes for admin exploration and sync preparation."""
 
     return service.list_sources(payload)
+
+
+@router.get("/sources/feishu/jobs", response_model=list[FeishuSyncJobResponse])
+def list_feishu_sync_jobs(
+    user: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> list[FeishuSyncJobResponse]:
+    """List saved Feishu sync jobs and their latest cursor checkpoints."""
+
+    return service.list_sync_jobs(user)
+
+
+@router.post("/sources/feishu/jobs", response_model=FeishuSyncJobResponse)
+def upsert_feishu_sync_job(
+    payload: FeishuSyncJobUpsertRequest,
+    user: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> FeishuSyncJobResponse:
+    """Create or update one saved Feishu sync job."""
+
+    return service.upsert_sync_job(payload, user)
+
+
+@router.post("/sources/feishu/jobs/{job_id}/run", response_model=FeishuBatchSyncResponse)
+def run_feishu_sync_job(
+    job_id: str,
+    user: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> FeishuBatchSyncResponse:
+    """Execute one saved Feishu sync job using its persisted cursor."""
+
+    return service.run_sync_job(job_id, user)
+
+
+@router.post("/sources/feishu/jobs/run-enabled", response_model=FeishuRunJobsResponse)
+def run_enabled_feishu_sync_jobs(
+    user: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> FeishuRunJobsResponse:
+    """Run every enabled Feishu sync job once for scheduler-style entrypoints."""
+
+    return service.run_enabled_sync_jobs(user)
 
 
 @router.post("/sources/feishu/import", response_model=FeishuImportResponse)

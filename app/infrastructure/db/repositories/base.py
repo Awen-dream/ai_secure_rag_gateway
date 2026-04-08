@@ -7,7 +7,7 @@ from app.domain.chat.models import ChatMessage, ChatSession
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.prompts.models import PromptTemplate
 from app.domain.risk.models import PolicyDefinition
-from app.domain.sources.models import SourceSyncRun
+from app.domain.sources.models import SourceSyncJob, SourceSyncRun
 
 
 class MetadataRepository(Protocol):
@@ -90,4 +90,13 @@ class MetadataRepository(Protocol):
         ...
 
     def list_source_sync_runs(self, tenant_id: str, provider: str) -> list[SourceSyncRun]:
+        ...
+
+    def save_source_sync_job(self, job: SourceSyncJob) -> None:
+        ...
+
+    def get_source_sync_job(self, tenant_id: str, provider: str, job_id: str) -> Optional[SourceSyncJob]:
+        ...
+
+    def list_source_sync_jobs(self, tenant_id: str, provider: str) -> list[SourceSyncJob]:
         ...

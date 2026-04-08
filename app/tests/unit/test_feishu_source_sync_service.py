@@ -7,7 +7,12 @@ from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
 from app.domain.retrieval.indexing import RetrievalIndexingService
-from app.domain.sources.schemas import FeishuBatchSyncRequest, FeishuImportRequest, FeishuListSourcesRequest
+from app.domain.sources.schemas import (
+    FeishuBatchSyncRequest,
+    FeishuImportRequest,
+    FeishuListSourcesRequest,
+    FeishuSyncJobUpsertRequest,
+)
 from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
@@ -316,6 +321,121 @@ class FeishuSourceSyncServiceTest(unittest.TestCase):
         self.assertEqual(response.next_cursor, "1")
         self.assertEqual(response.items[0].source_kind, "wiki")
         self.assertEqual(response.items[0].obj_type, "docx")
+
+    def test_upsert_and_run_sync_job_persists_cursor_checkpoint(self) -> None:
+        self.feishu_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+            "https://example.feishu.cn/wiki/wiki_token_2",
+            "https://example.feishu.cn/wiki/wiki_token_3",
+        ]
+
+        job = self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="finance wiki",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=2,
+                default_department_scope=["finance"],
+                default_async_mode=False,
+            ),
+            self.user,
+        )
+
+        first_run = self.service.run_sync_job(job.job_id, self.user)
+        self.assertEqual(first_run.listed_count, 2)
+        self.assertEqual(first_run.next_cursor, "2")
+
+        saved_job = self.repository.get_source_sync_job("t1", "feishu", job.job_id)
+        self.assertIsNotNone(saved_job)
+        self.assertEqual(saved_job.cursor, "2")
+        self.assertEqual(saved_job.last_run_status, "success")
+        self.assertIsNotNone(saved_job.last_run_id)
+
+        second_run = self.service.run_sync_job(job.job_id, self.user)
+        self.assertEqual(second_run.listed_count, 1)
+        self.assertIsNone(second_run.next_cursor)
+
+        saved_job = self.repository.get_source_sync_job("t1", "feishu", job.job_id)
+        self.assertIsNotNone(saved_job)
+        self.assertIsNone(saved_job.cursor)
+
+    def test_list_sync_jobs_returns_saved_jobs(self) -> None:
+        created = self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="finance wiki",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=5,
+            ),
+            self.user,
+        )
+
+        jobs = self.service.list_sync_jobs(self.user)
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].job_id, created.job_id)
+        self.assertEqual(jobs[0].name, "finance wiki")
+
+    def test_run_sync_job_updates_job_status_and_counters(self) -> None:
+        self.feishu_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+            "https://example.feishu.cn/wiki/wiki_token_2",
+        ]
+        job = self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="finance wiki",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=1,
+                default_department_scope=["finance"],
+                default_async_mode=False,
+            ),
+            self.user,
+        )
+
+        saved_before = self.repository.get_source_sync_job("t1", "feishu", job.job_id)
+        self.assertEqual(saved_before.status, "idle")
+        self.assertEqual(saved_before.run_count, 0)
+
+        self.service.run_sync_job(job.job_id, self.user)
+
+        saved_after = self.repository.get_source_sync_job("t1", "feishu", job.job_id)
+        self.assertEqual(saved_after.status, "idle")
+        self.assertEqual(saved_after.run_count, 1)
+        self.assertEqual(saved_after.success_count, 1)
+        self.assertEqual(saved_after.failure_count, 0)
+        self.assertEqual(saved_after.last_run_status, "success")
+
+    def test_run_enabled_sync_jobs_skips_disabled_jobs(self) -> None:
+        self.feishu_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+        ]
+        self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="enabled job",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=1,
+                default_department_scope=["finance"],
+                default_async_mode=False,
+                enabled=True,
+            ),
+            self.user,
+        )
+        self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="disabled job",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=1,
+                default_department_scope=["finance"],
+                default_async_mode=False,
+                enabled=False,
+            ),
+            self.user,
+        )
+
+        summary = self.service.run_enabled_sync_jobs(self.user)
+
+        self.assertEqual(summary.total_jobs, 2)
+        self.assertEqual(summary.succeeded_jobs, 1)
+        self.assertEqual(summary.failed_jobs, 0)
+        self.assertEqual(summary.skipped_jobs, 1)
 
 
 if __name__ == "__main__":

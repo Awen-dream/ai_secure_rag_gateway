@@ -124,3 +124,34 @@ CREATE TABLE IF NOT EXISTS source_sync_runs (
     status TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS source_sync_jobs (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    source_root TEXT,
+    space_id TEXT,
+    parent_node_token TEXT,
+    cursor TEXT,
+    limit_value INTEGER NOT NULL,
+    continue_on_error BOOLEAN NOT NULL,
+    default_owner_id TEXT,
+    default_department_scope JSONB NOT NULL,
+    default_visibility_scope JSONB NOT NULL,
+    default_security_level INTEGER NOT NULL,
+    default_tags JSONB NOT NULL,
+    default_async_mode BOOLEAN NOT NULL,
+    enabled BOOLEAN NOT NULL,
+    status TEXT NOT NULL DEFAULT 'idle',
+    last_error TEXT,
+    run_count INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_run_id TEXT,
+    last_run_status TEXT,
+    last_run_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
