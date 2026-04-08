@@ -182,6 +182,13 @@ scripts/
 - 文档访问与 chunk 访问共用同一套权限判断
 - Elasticsearch / PGVector 查询计划共用同一套 access filter 语义
 
+当前输出安全层已包含：
+
+- 常见 PII 脱敏：邮箱、手机号、身份证、银行卡号
+- 密钥/口令/令牌类内容拒答
+- 高敏部门输出降级为仅返回引用
+- 输出侧风险动作会回写到问答响应和审计日志
+
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 
 接口与核心方法备注说明规范见 [docs/development-standards.md](docs/development-standards.md)。

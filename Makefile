@@ -10,6 +10,8 @@ UNIT_TESTS = \
 	app.tests.unit.test_chat_rate_limit \
 	app.tests.unit.test_openai_client \
 	app.tests.unit.test_chat_llm_integration \
+	app.tests.unit.test_chat_output_guard_integration \
+	app.tests.unit.test_output_guard \
 	app.tests.unit.test_retrieval_backends \
 	app.tests.unit.test_admin_retrieval_endpoints
 

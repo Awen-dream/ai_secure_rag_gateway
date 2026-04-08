@@ -14,6 +14,7 @@ from app.domain.citations.services import build_citations
 from app.domain.prompts.services import PromptService
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
+from app.domain.risk.output_guard import OutputGuard
 from app.domain.risk.services import PolicyEngine
 from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.llm.openai_client import OpenAIClient
@@ -30,6 +31,7 @@ class ChatService:
         retrieval_service: RetrievalService,
         prompt_service: PromptService,
         policy_engine: PolicyEngine,
+        output_guard: OutputGuard,
         audit_service: AuditService,
         openai_client: OpenAIClient,
         session_cache: SessionCache | None = None,
@@ -38,6 +40,7 @@ class ChatService:
         self.retrieval_service = retrieval_service
         self.prompt_service = prompt_service
         self.policy_engine = policy_engine
+        self.output_guard = output_guard
         self.audit_service = audit_service
         self.openai_client = openai_client
         self.session_cache = session_cache
@@ -56,7 +59,7 @@ class ChatService:
         retrieved = self.retrieval_service.retrieve(user, payload.query)
         risk_action, risk_level = self.policy_engine.evaluate(user, payload.query, len(retrieved))
         citations = build_citations(retrieved)
-        answer = self._build_answer(
+        raw_answer = self._build_answer(
             query=payload.query,
             template=template,
             retrieved=retrieved,
@@ -64,6 +67,15 @@ class ChatService:
             risk_action=risk_action,
             session_summary=session.summary,
         )
+        guard_result = self.output_guard.apply(
+            user=user,
+            answer=raw_answer,
+            citations=citations,
+            risk_action=risk_action,
+        )
+        answer = guard_result.answer
+        risk_action = guard_result.action
+        risk_level = self._max_risk_level(risk_level, guard_result.risk_level)
 
         self._append_message(session.id, "user", payload.query)
         self._append_message(session.id, "assistant", answer, citations)
@@ -95,6 +107,13 @@ class ChatService:
             risk_action=risk_action,
             retrieved_chunks=len(retrieved),
         )
+
+    @staticmethod
+    def _max_risk_level(current: str, candidate: str) -> str:
+        """Return the higher-severity risk level between input and output-stage decisions."""
+
+        ranking = {"low": 1, "medium": 2, "high": 3}
+        return candidate if ranking.get(candidate, 0) > ranking.get(current, 0) else current
 
     def list_sessions(self, user: UserContext) -> list[ChatSession]:
         """List sessions that belong to the current user inside the current tenant."""

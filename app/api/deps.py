@@ -9,6 +9,7 @@ from app.domain.documents.services import DocumentService
 from app.domain.prompts.services import PromptService
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.domain.retrieval.services import RetrievalService
+from app.domain.risk.output_guard import OutputGuard
 from app.domain.risk.rate_limit import RateLimitService
 from app.domain.risk.services import PolicyEngine
 from app.infrastructure.cache.redis_client import RedisClient
@@ -129,6 +130,13 @@ def get_policy_engine() -> PolicyEngine:
 
 
 @lru_cache
+def get_output_guard() -> OutputGuard:
+    """Return the output-side safety guard used before answers leave the gateway."""
+
+    return OutputGuard()
+
+
+@lru_cache
 def get_audit_service() -> AuditService:
     """Return the audit service used for metrics and trace logging."""
 
@@ -170,6 +178,7 @@ def get_chat_service() -> ChatService:
         retrieval_service=get_retrieval_service(),
         prompt_service=get_prompt_service(),
         policy_engine=get_policy_engine(),
+        output_guard=get_output_guard(),
         audit_service=get_audit_service(),
         openai_client=get_openai_client(),
         session_cache=get_session_cache(),

@@ -6,9 +6,9 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 
-class ChatLLMIntegrationTest(unittest.TestCase):
+class ChatOutputGuardIntegrationTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.db_path = "/tmp/secure_rag_gateway_chat_llm.db"
+        self.db_path = "/tmp/secure_rag_gateway_chat_output_guard.db"
         Path(self.db_path).unlink(missing_ok=True)
 
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
@@ -76,12 +76,7 @@ class ChatLLMIntegrationTest(unittest.TestCase):
             "X-Role": "employee",
             "X-Clearance-Level": "2",
         }
-
-    def tearDown(self) -> None:
-        os.environ["OPENAI_API_KEY"] = ""
-
-    def test_chat_query_uses_openai_client_when_configured(self) -> None:
-        upload = self.client.post(
+        self.client.post(
             "/api/v1/docs/upload",
             json={
                 "title": "报销制度",
@@ -91,13 +86,12 @@ class ChatLLMIntegrationTest(unittest.TestCase):
             },
             headers=self.headers,
         )
-        self.assertEqual(upload.status_code, 200)
 
-        mocked_answer = "结论：审批时限为3个工作日。\n依据：[1] 报销制度。\n引用来源：[1] 报销制度 / Section 1 / v1"
+    def test_chat_query_masks_pii_from_llm_output(self) -> None:
         with patch(
             "app.infrastructure.llm.openai_client.OpenAIClient.generate_response",
-            return_value=mocked_answer,
-        ) as generate_response:
+            return_value="联系邮箱为 test@example.com，手机号是 13812345678。",
+        ):
             response = self.client.post(
                 "/api/v1/chat/query",
                 json={"query": "报销审批时限是什么？"},
@@ -106,10 +100,25 @@ class ChatLLMIntegrationTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["answer"], mocked_answer)
-        self.assertEqual(payload["risk_action"], "allow")
-        self.assertEqual(len(payload["citations"]), 1)
-        generate_response.assert_called_once()
+        self.assertEqual(payload["risk_action"], "mask")
+        self.assertIn("[REDACTED_EMAIL]", payload["answer"])
+        self.assertIn("[REDACTED_PHONE]", payload["answer"])
+
+    def test_chat_query_refuses_secret_material_from_llm_output(self) -> None:
+        with patch(
+            "app.infrastructure.llm.openai_client.OpenAIClient.generate_response",
+            return_value="数据库密码是 secret-password-123。",
+        ):
+            response = self.client.post(
+                "/api/v1/chat/query",
+                json={"query": "报销审批时限是什么？"},
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["risk_action"], "refuse")
+        self.assertIn("平台已拒绝输出", payload["answer"])
 
 
 if __name__ == "__main__":
