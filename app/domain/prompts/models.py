@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -19,3 +19,32 @@ class RenderedPrompt(BaseModel):
 
     instructions: str
     input_text: str
+
+
+class PromptPreviewRequest(BaseModel):
+    scene: str
+    query: str
+    session_summary: str = ""
+    top_k: int = 4
+
+
+class PromptPreviewResponse(BaseModel):
+    scene: str
+    template_id: str
+    template_version: int
+    instructions: str
+    input_text: str
+    retrieved_chunks: int
+
+
+class PromptValidationRequest(BaseModel):
+    scene: str
+    answer: str
+
+
+class PromptValidationResult(BaseModel):
+    template_id: str
+    template_version: int
+    valid: bool
+    missing_sections: List[str] = Field(default_factory=list)
+    normalized_answer: str

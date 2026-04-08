@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import (
@@ -15,7 +19,14 @@ from app.domain.auth.filter_builder import build_access_filter
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
-from app.domain.prompts.models import PromptTemplate
+from app.domain.citations.services import build_citations
+from app.domain.prompts.models import (
+    PromptPreviewRequest,
+    PromptPreviewResponse,
+    PromptTemplate,
+    PromptValidationRequest,
+    PromptValidationResult,
+)
 from app.domain.prompts.services import PromptService
 from app.domain.retrieval.models import (
     RetrievalBackendHealth,
@@ -39,10 +50,11 @@ router = APIRouter()
 
 @router.get("/prompts", response_model=list[PromptTemplate])
 def list_prompt_templates(
+    scene: Optional[str] = None,
     _: UserContext = Depends(require_admin),
     service: PromptService = Depends(get_prompt_service),
 ) -> list[PromptTemplate]:
-    return service.list_templates()
+    return service.list_templates(scene)
 
 
 @router.post("/prompts", response_model=PromptTemplate)
@@ -52,6 +64,52 @@ def create_prompt_template(
     service: PromptService = Depends(get_prompt_service),
 ) -> PromptTemplate:
     return service.add_template(payload)
+
+
+@router.post("/prompts/{template_id}/enable", response_model=PromptTemplate)
+def set_prompt_template_enabled(
+    template_id: str,
+    enabled: bool = Query(...),
+    _: UserContext = Depends(require_admin),
+    service: PromptService = Depends(get_prompt_service),
+) -> PromptTemplate:
+    """Enable or disable one prompt template version."""
+
+    try:
+        return service.set_template_enabled(template_id, enabled)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt template not found.") from exc
+
+
+@router.post("/prompts/preview", response_model=PromptPreviewResponse)
+def preview_prompt_template(
+    payload: PromptPreviewRequest,
+    user: UserContext = Depends(require_admin),
+    prompt_service: PromptService = Depends(get_prompt_service),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+) -> PromptPreviewResponse:
+    """Render the active prompt with live retrieval evidence for admin preview."""
+
+    retrieved = retrieval_service.retrieve(user, payload.query, top_k=payload.top_k)
+    citations = build_citations(retrieved)
+    return prompt_service.preview_chat_prompt(
+        scene=payload.scene,
+        query=payload.query,
+        retrieved=retrieved,
+        citations=citations,
+        session_summary=payload.session_summary,
+    )
+
+
+@router.post("/prompts/validate", response_model=PromptValidationResult)
+def validate_prompt_output(
+    payload: PromptValidationRequest,
+    _: UserContext = Depends(require_admin),
+    service: PromptService = Depends(get_prompt_service),
+) -> PromptValidationResult:
+    """Validate one answer against the active prompt template output schema."""
+
+    return service.validate_output(payload.scene, payload.answer)
 
 
 @router.get("/policies", response_model=list[PolicyDefinition])

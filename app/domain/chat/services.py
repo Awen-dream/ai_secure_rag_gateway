@@ -77,7 +77,8 @@ class ChatService:
             citations=citations,
             risk_action=risk_action,
         )
-        answer = guard_result.answer
+        validation = self.prompt_service.validate_output(payload.scene, guard_result.answer)
+        answer = validation.normalized_answer
         risk_action = guard_result.action
         risk_level = self._max_risk_level(risk_level, guard_result.risk_level)
 

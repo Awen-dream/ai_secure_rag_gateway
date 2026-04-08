@@ -122,7 +122,7 @@ class ChatLLMIntegrationTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["answer"], mocked_answer)
+        self.assertEqual(payload["answer"], mocked_answer + "\n限制说明：无。")
         self.assertEqual(payload["risk_action"], "allow")
         self.assertEqual(len(payload["citations"]), 1)
         generate_response.assert_called_once()

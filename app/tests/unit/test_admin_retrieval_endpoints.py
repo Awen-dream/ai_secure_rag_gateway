@@ -120,6 +120,63 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["backend"], "feishu")
         self.assertFalse(payload["execute_enabled"])
 
+    def test_admin_can_enable_preview_and_validate_prompt_templates(self) -> None:
+        created = self.client.post(
+            "/api/v1/admin/prompts",
+            json={
+                "id": "prompt_standard_v2",
+                "scene": "standard_qa",
+                "version": 2,
+                "name": "Standard QA V2",
+                "content": "Use citations and answer conservatively.",
+                "output_schema": {"sections": "结论,依据,引用来源,限制说明"},
+                "enabled": False,
+                "created_by": "admin",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 200)
+        self.assertFalse(created.json()["enabled"])
+
+        enabled = self.client.post(
+            "/api/v1/admin/prompts/prompt_standard_v2/enable",
+            params={"enabled": "true"},
+            headers=self.headers,
+        )
+        self.assertEqual(enabled.status_code, 200)
+        self.assertTrue(enabled.json()["enabled"])
+
+        self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "报销制度",
+                "content": "报销制度说明。\n\n审批时限为3个工作日。",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        preview = self.client.post(
+            "/api/v1/admin/prompts/preview",
+            json={"scene": "standard_qa", "query": "报销审批时限是什么？", "top_k": 3},
+            headers=self.headers,
+        )
+        self.assertEqual(preview.status_code, 200)
+        preview_payload = preview.json()
+        self.assertEqual(preview_payload["template_id"], "prompt_standard_v2")
+        self.assertIn("用户问题", preview_payload["input_text"])
+
+        validation = self.client.post(
+            "/api/v1/admin/prompts/validate",
+            json={"scene": "standard_qa", "answer": "结论：已回答。\n依据：来自授权资料。"},
+            headers=self.headers,
+        )
+        self.assertEqual(validation.status_code, 200)
+        validation_payload = validation.json()
+        self.assertFalse(validation_payload["valid"])
+        self.assertIn("引用来源", validation_payload["missing_sections"])
+        self.assertIn("限制说明", validation_payload["normalized_answer"])
+
     def test_admin_can_view_backend_plan(self) -> None:
         es_response = self.client.get(
             "/api/v1/admin/retrieval/backends/elasticsearch/plan",
