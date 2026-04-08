@@ -31,7 +31,7 @@ INTEGRATION_TESTS = \
 	app.tests.integration.test_postgres_metadata_repository_integration \
 	app.tests.integration.test_redis_integration
 
-.PHONY: install run run-ingestion-worker test-unit test-integration test-all integration-up integration-down compile
+.PHONY: install run run-ingestion-worker run-feishu-sync-scheduler test-unit test-integration test-all integration-up integration-down compile
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -41,6 +41,9 @@ run:
 
 run-ingestion-worker:
 	PYTHONPATH=. $(PYTHON) scripts/run_document_ingestion_worker.py
+
+run-feishu-sync-scheduler:
+	PYTHONPATH=. $(PYTHON) scripts/run_feishu_sync_scheduler.py
 
 compile:
 	PYTHONPYCACHEPREFIX=/tmp/pycache $(PYTHON) -m py_compile $$(find app -name '*.py' -print) main.py

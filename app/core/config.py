@@ -20,6 +20,7 @@ class AppSettings(BaseModel):
     rate_limit_max_requests: int = int(os.getenv("APP_RATE_LIMIT_MAX_REQUESTS", "30"))
     document_ingestion_queue_name: str = os.getenv("APP_DOCUMENT_INGESTION_QUEUE_NAME", "queue:document_ingestion")
     document_ingestion_worker_poll_seconds: float = float(os.getenv("APP_DOCUMENT_INGESTION_WORKER_POLL_SECONDS", "1.0"))
+    source_sync_scheduler_poll_seconds: float = float(os.getenv("APP_SOURCE_SYNC_SCHEDULER_POLL_SECONDS", "60.0"))
     feishu_base_url: str = os.getenv("APP_FEISHU_BASE_URL", "https://open.feishu.cn/open-apis")
     feishu_app_id: Optional[str] = os.getenv("APP_FEISHU_APP_ID")
     feishu_app_secret: Optional[str] = os.getenv("APP_FEISHU_APP_SECRET")

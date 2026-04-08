@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import time
 from datetime import datetime
 
 from app.domain.auth.models import UserContext
@@ -353,6 +354,42 @@ class FeishuSourceSyncService:
             items=items,
         )
 
+    def run_enabled_sync_jobs_all_tenants(self) -> FeishuRunJobsResponse:
+        """Run every enabled Feishu sync job across tenants for scheduler workers."""
+
+        items: list[FeishuBatchSyncResponse] = []
+        failed_jobs = 0
+        skipped_jobs = 0
+        jobs = self.repository.list_source_sync_jobs_all(self.feishu_client.provider)
+        for job in jobs:
+            if not job.enabled:
+                skipped_jobs += 1
+                continue
+            if job.status == "running":
+                skipped_jobs += 1
+                continue
+            scheduler_user = self._build_scheduler_user(job)
+            try:
+                items.append(self.run_sync_job(job.id, scheduler_user))
+            except Exception:
+                failed_jobs += 1
+
+        return FeishuRunJobsResponse(
+            total_jobs=len(jobs),
+            succeeded_jobs=len(items),
+            failed_jobs=failed_jobs,
+            skipped_jobs=skipped_jobs,
+            items=items,
+        )
+
+    def run_scheduler_forever(self, poll_seconds: float) -> None:
+        """Run the Feishu sync scheduler loop forever using a fixed polling interval."""
+
+        sleep_seconds = max(float(poll_seconds), 1.0)
+        while True:
+            self.run_enabled_sync_jobs_all_tenants()
+            time.sleep(sleep_seconds)
+
     def list_sources(self, payload: FeishuListSourcesRequest) -> FeishuListSourcesResponse:
         """List Feishu spaces or nodes for admin exploration and sync preparation."""
 
@@ -498,3 +535,15 @@ class FeishuSourceSyncService:
                 document.id,
                 reason="retired because source disappeared from Feishu sync scope",
             )
+
+    @staticmethod
+    def _build_scheduler_user(job: SourceSyncJob) -> UserContext:
+        """Build an internal admin-like user context for scheduler-driven job execution."""
+
+        return UserContext(
+            user_id=job.created_by or "system_scheduler",
+            tenant_id=job.tenant_id,
+            department_id=(job.default_department_scope[0] if job.default_department_scope else "system"),
+            role="admin",
+            clearance_level=10,
+        )

@@ -472,6 +472,47 @@ class FeishuSourceSyncServiceTest(unittest.TestCase):
         self.assertEqual(retired.status, DocumentStatus.RETIRED)
         self.assertFalse(self.service.document_service.source_store.has_source(retired.id, retired.source_type))
 
+    def test_run_enabled_sync_jobs_all_tenants_executes_cross_tenant_jobs(self) -> None:
+        self.feishu_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+        ]
+        self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="tenant one job",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=1,
+                default_department_scope=["finance"],
+                default_async_mode=False,
+            ),
+            self.user,
+        )
+
+        tenant_two_user = UserContext(
+            user_id="u2",
+            tenant_id="t2",
+            department_id="hr",
+            role="admin",
+            clearance_level=3,
+        )
+        self.service.upsert_sync_job(
+            FeishuSyncJobUpsertRequest(
+                name="tenant two job",
+                source_root="https://example.feishu.cn/wiki/root_node",
+                limit=1,
+                default_department_scope=["hr"],
+                default_async_mode=False,
+            ),
+            tenant_two_user,
+        )
+
+        summary = self.service.run_enabled_sync_jobs_all_tenants()
+
+        self.assertEqual(summary.total_jobs, 2)
+        self.assertEqual(summary.succeeded_jobs, 2)
+        self.assertEqual(summary.failed_jobs, 0)
+        self.assertEqual(len(self.repository.list_documents("t1")), 1)
+        self.assertEqual(len(self.repository.list_documents("t2")), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

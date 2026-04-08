@@ -772,6 +772,18 @@ class PostgresRepository:
             ).fetchall()
         return [self._row_to_source_sync_job(row) for row in rows]
 
+    def list_source_sync_jobs_all(self, provider: str) -> list[SourceSyncJob]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_sync_jobs
+                WHERE provider = %s
+                ORDER BY created_at DESC
+                """,
+                (provider,),
+            ).fetchall()
+        return [self._row_to_source_sync_job(row) for row in rows]
+
     def _row_to_document(self, row: dict) -> DocumentRecord:
         return DocumentRecord(
             id=row["id"],

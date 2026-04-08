@@ -100,3 +100,6 @@ class MetadataRepository(Protocol):
 
     def list_source_sync_jobs(self, tenant_id: str, provider: str) -> list[SourceSyncJob]:
         ...
+
+    def list_source_sync_jobs_all(self, provider: str) -> list[SourceSyncJob]:
+        ...
