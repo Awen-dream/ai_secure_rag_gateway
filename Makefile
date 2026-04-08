@@ -18,6 +18,8 @@ UNIT_TESTS = \
 	app.tests.unit.test_chat_rate_limit \
 	app.tests.unit.test_openai_client \
 	app.tests.unit.test_openai_embeddings \
+	app.tests.unit.test_query_intent \
+	app.tests.unit.test_query_understanding \
 	app.tests.unit.test_chat_llm_integration \
 	app.tests.unit.test_chat_output_guard_integration \
 	app.tests.unit.test_output_guard \

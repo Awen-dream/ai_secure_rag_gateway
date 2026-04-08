@@ -450,6 +450,9 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertIn("score", log["retrieval_docs_json"][0])
         self.assertIn("template_id", log["prompt_json"])
         self.assertIn("final_action", log["risk_json"])
+        self.assertEqual(log["conversation_json"]["intent"], "standard_qa")
+        self.assertGreater(log["conversation_json"]["intent_confidence"], 0)
+        self.assertIsInstance(log["conversation_json"]["intent_reasons"], list)
 
 
 if __name__ == "__main__":

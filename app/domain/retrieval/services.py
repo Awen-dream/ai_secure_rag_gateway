@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.application.query.intent import classify_query_intent_details
+from app.application.query.understanding import QueryUnderstandingService
 from app.application.query.retrieval_cache import RetrievalCache
 from app.application.query.rewrite import rewrite_query
 from app.domain.auth.filter_builder import build_access_filter
@@ -28,12 +28,14 @@ class RetrievalService:
         vector_backend: VectorSearchBackend,
         retrieval_cache: RetrievalCache | None = None,
         reranker: HeuristicReranker | None = None,
+        query_understanding: QueryUnderstandingService | None = None,
     ) -> None:
         self.document_service = document_service
         self.keyword_backend = keyword_backend
         self.vector_backend = vector_backend
         self.retrieval_cache = retrieval_cache
         self.reranker = reranker
+        self.query_understanding = query_understanding or QueryUnderstandingService()
 
     def retrieve(self, user: UserContext, query: str, top_k: int = 5) -> list[RetrievalResult]:
         """Run permission-aware hybrid retrieval and return fused evidence chunks."""
@@ -44,9 +46,9 @@ class RetrievalService:
     def explain(self, user: UserContext, query: str, top_k: int = 5) -> RetrievalExplainResponse:
         """Return an admin-friendly explanation of how hybrid retrieval handled the query."""
 
-        rewritten = rewrite_query(query)
-        intent_result = classify_query_intent_details(rewritten)
-        profile = get_retrieval_profile(intent_result.intent)
+        understanding = self.query_understanding.understand(query)
+        rewritten = understanding.rewritten_query or rewrite_query(query)
+        profile = get_retrieval_profile(understanding.intent)
         terms = normalize_terms(rewritten)
         cached_results = None
         if self.retrieval_cache:
@@ -59,9 +61,9 @@ class RetrievalService:
                 self.retrieval_cache.set_results(user, rewritten, min(top_k, profile.top_k), results)
         return RetrievalExplainResponse(
             rewritten_query=rewritten,
-            intent=intent_result.intent,
-            intent_confidence=intent_result.confidence,
-            intent_reasons=intent_result.reasons,
+            intent=understanding.intent,
+            intent_confidence=understanding.confidence,
+            intent_reasons=understanding.reasons,
             profile=profile,
             results=sort_by_score(results)[: min(top_k, profile.top_k)],
         )

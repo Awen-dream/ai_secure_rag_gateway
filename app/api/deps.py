@@ -2,6 +2,7 @@ from functools import lru_cache
 
 from app.application.conversation.memory import ConversationManager
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
+from app.application.query.understanding import QueryUnderstandingService
 from app.core.config import settings
 from app.application.conversation.session_cache import SessionCache
 from app.application.query.retrieval_cache import RetrievalCache
@@ -242,6 +243,7 @@ def get_retrieval_service() -> RetrievalService:
         vector_backend=get_vector_backend(),
         retrieval_cache=get_retrieval_cache(),
         reranker=get_retrieval_reranker(),
+        query_understanding=QueryUnderstandingService(get_openai_client()),
     )
 
 
