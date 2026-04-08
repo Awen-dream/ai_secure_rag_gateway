@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 
-from app.application.query.intent import classify_query_intent_details
 from app.domain.audit.models import AuditLog, RetrievalMetrics
 from app.domain.auth.models import UserContext
 from app.domain.prompts.models import PromptTemplate, PromptValidationResult
@@ -41,7 +40,7 @@ class AuditService:
     ) -> None:
         """Persist one structured audit record spanning retrieval, prompt, conversation and risk decisions."""
 
-        intent_result = classify_query_intent_details(rewritten_query)
+        understanding = conversation_context.query_understanding
         self.repository.append_audit_log(
             AuditLog(
                 id=f"audit_{uuid.uuid4().hex[:12]}",
@@ -85,9 +84,14 @@ class AuditService:
                 },
                 conversation_json={
                     "rewritten_query": rewritten_query,
-                    "intent": intent_result.intent,
-                    "intent_confidence": intent_result.confidence,
-                    "intent_reasons": intent_result.reasons,
+                    "intent": understanding.intent,
+                    "intent_confidence": understanding.confidence,
+                    "intent_reasons": understanding.reasons,
+                    "understanding_source": understanding.source,
+                    "rule_rewritten_query": understanding.rule_rewritten_query,
+                    "rule_intent": understanding.rule_intent,
+                    "rule_intent_confidence": understanding.rule_confidence,
+                    "rule_intent_reasons": understanding.rule_reasons,
                     "topic_switched": conversation_context.topic_switched,
                     "used_history": conversation_context.used_history,
                     "active_topic": conversation_context.active_topic,

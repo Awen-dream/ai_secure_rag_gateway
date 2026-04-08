@@ -49,6 +49,11 @@ class RetrievalExplainResponse(BaseModel):
     intent: str
     intent_confidence: float = 0.0
     intent_reasons: List[str] = Field(default_factory=list)
+    understanding_source: str = "rule"
+    rule_rewritten_query: str = ""
+    rule_intent: str = "standard_qa"
+    rule_intent_confidence: float = 0.0
+    rule_intent_reasons: List[str] = Field(default_factory=list)
     profile: RetrievalProfile
     results: List[RetrievalResult] = Field(default_factory=list)
 

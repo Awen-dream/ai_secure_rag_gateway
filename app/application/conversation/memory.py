@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from app.application.conversation.summarizer import summarize_long_history
 from app.application.query.intent import classify_query_intent
 from app.application.query.rewrite import rewrite_query
-from app.application.query.understanding import QueryUnderstandingService
+from app.application.query.understanding import QueryUnderstandingResult, QueryUnderstandingService
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession
 from app.infrastructure.db.repositories.base import MetadataRepository
@@ -31,6 +31,7 @@ FOLLOW_UP_MARKERS = {
 @dataclass(frozen=True)
 class ConversationContext:
     rewritten_query: str
+    query_understanding: QueryUnderstandingResult
     session_summary: str
     topic_switched: bool
     active_topic: str
@@ -89,6 +90,7 @@ class ConversationManager:
 
         return ConversationContext(
             rewritten_query=rewritten_query,
+            query_understanding=understanding,
             session_summary=summary,
             topic_switched=topic_switched or permission_changed,
             active_topic=active_topic,

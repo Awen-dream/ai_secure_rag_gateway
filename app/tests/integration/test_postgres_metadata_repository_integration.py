@@ -160,6 +160,8 @@ class PostgresMetadataRepositoryIntegrationTest(unittest.TestCase):
         self.assertIn("rewritten_query", audit_logs[0].conversation_json)
         self.assertIn("intent", audit_logs[0].conversation_json)
         self.assertIn("intent_confidence", audit_logs[0].conversation_json)
+        self.assertIn("understanding_source", audit_logs[0].conversation_json)
+        self.assertIn("rule_intent", audit_logs[0].conversation_json)
 
 
 if __name__ == "__main__":

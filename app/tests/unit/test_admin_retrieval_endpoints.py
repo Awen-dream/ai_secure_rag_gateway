@@ -413,6 +413,9 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["intent"], "standard_qa")
         self.assertGreater(payload["intent_confidence"], 0)
         self.assertIsInstance(payload["intent_reasons"], list)
+        self.assertIn("understanding_source", payload)
+        self.assertIn("rule_intent", payload)
+        self.assertIn("rule_rewritten_query", payload)
         self.assertGreaterEqual(len(payload["results"]), 1)
         self.assertIn("elasticsearch", payload["results"][0]["retrieval_sources"])
         self.assertIn("pgvector", payload["results"][0]["retrieval_sources"])
@@ -453,6 +456,9 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(log["conversation_json"]["intent"], "standard_qa")
         self.assertGreater(log["conversation_json"]["intent_confidence"], 0)
         self.assertIsInstance(log["conversation_json"]["intent_reasons"], list)
+        self.assertIn("understanding_source", log["conversation_json"])
+        self.assertIn("rule_intent", log["conversation_json"])
+        self.assertIn("rule_rewritten_query", log["conversation_json"])
 
 
 if __name__ == "__main__":

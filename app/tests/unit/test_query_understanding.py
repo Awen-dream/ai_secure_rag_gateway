@@ -22,6 +22,8 @@ class QueryUnderstandingServiceTest(unittest.TestCase):
         self.assertEqual(result.intent, "exact_lookup")
         self.assertEqual(result.source, "rule")
         self.assertEqual(result.rewritten_query, "报销制度文档编号是多少？")
+        self.assertEqual(result.rule_intent, "exact_lookup")
+        self.assertEqual(result.rule_rewritten_query, "报销制度文档编号是多少？")
 
     def test_uses_llm_result_when_json_is_valid(self) -> None:
         client = OpenAIClient(
@@ -46,6 +48,7 @@ class QueryUnderstandingServiceTest(unittest.TestCase):
         self.assertEqual(result.source, "llm")
         self.assertEqual(result.rewritten_query, "报销制度和采购制度的审批差异")
         self.assertIn("llm_query_understanding", result.reasons)
+        self.assertEqual(result.rule_intent, "summary")
 
     def test_returns_fallback_when_llm_output_is_invalid(self) -> None:
         client = OpenAIClient(
@@ -64,6 +67,29 @@ class QueryUnderstandingServiceTest(unittest.TestCase):
         self.assertEqual(result.intent, "summary")
         self.assertEqual(result.source, "fallback")
         self.assertIn("llm_fallback", result.reasons)
+        self.assertEqual(result.rule_intent, "summary")
+
+    def test_rewrite_guardrail_preserves_critical_terms(self) -> None:
+        client = OpenAIClient(
+            api_key="test-key",
+            model="gpt-5.4-mini",
+            base_url="https://api.openai.com/v1",
+            timeout_seconds=30,
+            max_output_tokens=256,
+            temperature=0.0,
+        )
+        client.generate_response = Mock(
+            return_value=(
+                '{"rewritten_query":"查看报销制度",'
+                '"intent":"exact_lookup","confidence":0.93,"reasons":["metadata_lookup_pattern"]}'
+            )
+        )
+        service = QueryUnderstandingService(client)
+
+        result = service.understand("报销制度第2版编号是多少？")
+
+        self.assertEqual(result.rewritten_query, result.rule_rewritten_query)
+        self.assertIn("missing_critical_terms", result.reasons)
 
 
 if __name__ == "__main__":

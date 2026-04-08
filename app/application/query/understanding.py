@@ -4,12 +4,27 @@ import json
 import re
 from dataclasses import dataclass
 
+from pydantic import BaseModel, Field, ValidationError
+
 from app.application.query.intent import classify_query_intent_details
 from app.application.query.rewrite import rewrite_query
 from app.infrastructure.llm.openai_client import OpenAIClient
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 _ALLOWED_INTENTS = {"exact_lookup", "summary", "standard_qa"}
+_VERSION_RE = re.compile(r"(?:第\s*\d+\s*版|\bv\s*\d+(?:\.\d+)*\b|\bversion\s*\d+(?:\.\d+)*\b)", re.IGNORECASE)
+_IDENTIFIER_RE = re.compile(
+    r"(?:\b[A-Z]{2,}-\d+\b|\b[a-z]+[_-]id\b|\bdoc[_-]?\d+\b|\b[a-z0-9]{6,}[-_][a-z0-9]{2,}\b)",
+    re.IGNORECASE,
+)
+_QUOTED_RE = re.compile(r"[\"'“”‘’]([^\"'“”‘’]{2,80})[\"'“”‘’]")
+
+
+class _LLMUnderstandingPayload(BaseModel):
+    rewritten_query: str = Field(min_length=1, max_length=512)
+    intent: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasons: list[str] = Field(default_factory=list, max_length=8)
 
 
 @dataclass(frozen=True)
@@ -19,6 +34,10 @@ class QueryUnderstandingResult:
     confidence: float
     reasons: list[str]
     source: str
+    rule_rewritten_query: str
+    rule_intent: str
+    rule_confidence: float
+    rule_reasons: list[str]
 
 
 class QueryUnderstandingService:
@@ -64,6 +83,10 @@ class QueryUnderstandingService:
                 confidence=fallback.confidence,
                 reasons=list(dict.fromkeys(fallback.reasons + ["llm_fallback"])),
                 source="fallback",
+                rule_rewritten_query=fallback.rule_rewritten_query,
+                rule_intent=fallback.rule_intent,
+                rule_confidence=fallback.rule_confidence,
+                rule_reasons=fallback.rule_reasons,
             )
 
     def _fallback_result(
@@ -82,6 +105,10 @@ class QueryUnderstandingService:
             confidence=intent_result.confidence,
             reasons=intent_result.reasons,
             source="rule",
+            rule_rewritten_query=rewritten_query,
+            rule_intent=intent_result.intent,
+            rule_confidence=intent_result.confidence,
+            rule_reasons=intent_result.reasons,
         )
 
     def _should_use_llm(
@@ -143,19 +170,25 @@ class QueryUnderstandingService:
         original_query: str,
         fallback: QueryUnderstandingResult,
     ) -> QueryUnderstandingResult:
-        payload = self._extract_json_payload(response_text)
-        rewritten_query = rewrite_query(str(payload.get("rewritten_query") or "").strip()) or fallback.rewritten_query
-        intent = str(payload.get("intent") or "").strip()
+        payload = self._validate_payload(self._extract_json_payload(response_text))
+        rewritten_query = rewrite_query(payload.rewritten_query.strip()) or fallback.rewritten_query
+        intent = payload.intent.strip()
         if intent not in _ALLOWED_INTENTS:
             raise ValueError("Unsupported query intent returned by LLM")
 
-        confidence = self._normalize_confidence(payload.get("confidence"), fallback.confidence)
-        reasons = self._normalize_reasons(payload.get("reasons"), fallback.reasons)
-
-        # Guard against over-aggressive rewrites that erase the original query.
-        if len(rewritten_query) < max(4, len(rewrite_query(original_query)) // 3):
+        confidence = self._normalize_confidence(payload.confidence, fallback.confidence)
+        reasons = self._normalize_reasons(payload.reasons, fallback.reasons)
+        rewritten_query, reasons = self._apply_rewrite_guardrails(
+            original_query=original_query,
+            rewritten_query=rewritten_query,
+            fallback=fallback,
+            reasons=reasons,
+        )
+        if confidence < 0.55:
             rewritten_query = fallback.rewritten_query
-            reasons = list(dict.fromkeys(reasons + ["rewrite_guardrail"]))
+            intent = fallback.intent
+            confidence = fallback.confidence
+            reasons = list(dict.fromkeys(reasons + ["low_llm_confidence"]))
 
         return QueryUnderstandingResult(
             rewritten_query=rewritten_query,
@@ -163,6 +196,10 @@ class QueryUnderstandingService:
             confidence=confidence,
             reasons=list(dict.fromkeys(reasons + ["llm_query_understanding"])),
             source="llm",
+            rule_rewritten_query=fallback.rule_rewritten_query,
+            rule_intent=fallback.rule_intent,
+            rule_confidence=fallback.rule_confidence,
+            rule_reasons=fallback.rule_reasons,
         )
 
     @staticmethod
@@ -174,6 +211,15 @@ class QueryUnderstandingService:
         if not isinstance(payload, dict):
             raise ValueError("Query understanding payload must be a JSON object")
         return payload
+
+    @staticmethod
+    def _validate_payload(payload: dict) -> _LLMUnderstandingPayload:
+        try:
+            if hasattr(_LLMUnderstandingPayload, "model_validate"):
+                return _LLMUnderstandingPayload.model_validate(payload)
+            return _LLMUnderstandingPayload.parse_obj(payload)
+        except ValidationError as exc:
+            raise ValueError("Query understanding payload failed schema validation") from exc
 
     @staticmethod
     def _normalize_confidence(value: object, default: float) -> float:
@@ -189,3 +235,40 @@ class QueryUnderstandingService:
             return list(default)
         reasons = [str(item).strip() for item in value if str(item).strip()]
         return reasons[:8] or list(default)
+
+    def _apply_rewrite_guardrails(
+        self,
+        original_query: str,
+        rewritten_query: str,
+        fallback: QueryUnderstandingResult,
+        reasons: list[str],
+    ) -> tuple[str, list[str]]:
+        normalized_original = rewrite_query(original_query)
+
+        if len(rewritten_query) < max(4, len(normalized_original) // 3):
+            return fallback.rewritten_query, list(dict.fromkeys(reasons + ["rewrite_too_short"]))
+        if len(rewritten_query) > max(160, len(fallback.rewritten_query) * 3):
+            return fallback.rewritten_query, list(dict.fromkeys(reasons + ["rewrite_too_long"]))
+
+        missing_terms = [
+            term
+            for term in self._extract_critical_terms(normalized_original)
+            if term.lower() not in rewritten_query.lower()
+        ]
+        if missing_terms:
+            return fallback.rewritten_query, list(dict.fromkeys(reasons + ["missing_critical_terms"]))
+
+        return rewritten_query, reasons
+
+    @staticmethod
+    def _extract_critical_terms(query: str) -> list[str]:
+        terms: list[str] = []
+        for pattern in (_VERSION_RE, _IDENTIFIER_RE, _QUOTED_RE):
+            for match in pattern.finditer(query):
+                if match.groups():
+                    terms.extend(group.strip() for group in match.groups() if group and group.strip())
+                else:
+                    value = match.group(0).strip()
+                    if value:
+                        terms.append(value)
+        return list(dict.fromkeys(terms))

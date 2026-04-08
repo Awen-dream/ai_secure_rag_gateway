@@ -40,6 +40,10 @@ class _Understanding:
             confidence=0.9,
             reasons=["test_stub"],
             source="llm",
+            rule_rewritten_query=query,
+            rule_intent="standard_qa",
+            rule_confidence=0.6,
+            rule_reasons=["test_rule"],
         )
 
 

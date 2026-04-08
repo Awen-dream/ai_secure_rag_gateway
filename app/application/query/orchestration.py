@@ -1,13 +1,16 @@
-from app.application.query.intent import classify_query_intent_details
-from app.application.query.rewrite import rewrite_query
+from app.application.query.understanding import QueryUnderstandingService
 
 
 def prepare_query(query: str) -> dict:
-    rewritten = rewrite_query(query)
-    intent_result = classify_query_intent_details(rewritten)
+    result = QueryUnderstandingService().understand(query)
     return {
-        "rewritten_query": rewritten,
-        "intent": intent_result.intent,
-        "intent_confidence": intent_result.confidence,
-        "intent_reasons": intent_result.reasons,
+        "rewritten_query": result.rewritten_query,
+        "intent": result.intent,
+        "intent_confidence": result.confidence,
+        "intent_reasons": result.reasons,
+        "understanding_source": result.source,
+        "rule_rewritten_query": result.rule_rewritten_query,
+        "rule_intent": result.rule_intent,
+        "rule_intent_confidence": result.rule_confidence,
+        "rule_intent_reasons": result.rule_reasons,
     }

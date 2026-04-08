@@ -64,6 +64,11 @@ class RetrievalService:
             intent=understanding.intent,
             intent_confidence=understanding.confidence,
             intent_reasons=understanding.reasons,
+            understanding_source=understanding.source,
+            rule_rewritten_query=understanding.rule_rewritten_query,
+            rule_intent=understanding.rule_intent,
+            rule_intent_confidence=understanding.rule_confidence,
+            rule_intent_reasons=understanding.rule_reasons,
             profile=profile,
             results=sort_by_score(results)[: min(top_k, profile.top_k)],
         )
