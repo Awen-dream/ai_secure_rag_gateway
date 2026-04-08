@@ -152,7 +152,12 @@ class PostgresRepository:
                     session_id TEXT NOT NULL,
                     request_id TEXT NOT NULL,
                     query TEXT NOT NULL,
+                    rewritten_query TEXT NOT NULL DEFAULT '',
+                    scene TEXT NOT NULL DEFAULT '',
                     retrieval_docs_json JSONB NOT NULL,
+                    prompt_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    risk_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    conversation_json JSONB NOT NULL DEFAULT '{}'::jsonb,
                     response_summary TEXT NOT NULL,
                     action TEXT NOT NULL,
                     risk_level TEXT NOT NULL,
@@ -160,6 +165,17 @@ class PostgresRepository:
                     created_at TIMESTAMPTZ NOT NULL
                 )
                 """
+            )
+            connection.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS rewritten_query TEXT NOT NULL DEFAULT ''")
+            connection.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS scene TEXT NOT NULL DEFAULT ''")
+            connection.execute(
+                "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS prompt_json JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+            connection.execute(
+                "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS risk_json JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+            connection.execute(
+                "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS conversation_json JSONB NOT NULL DEFAULT '{}'::jsonb"
             )
 
     @staticmethod
@@ -469,9 +485,10 @@ class PostgresRepository:
             connection.execute(
                 """
                 INSERT INTO audit_logs (
-                    id, user_id, tenant_id, session_id, request_id, query, retrieval_docs_json,
+                    id, user_id, tenant_id, session_id, request_id, query, rewritten_query, scene,
+                    retrieval_docs_json, prompt_json, risk_json, conversation_json,
                     response_summary, action, risk_level, latency_ms, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s)
                 """,
                 (
                     log.id,
@@ -480,7 +497,12 @@ class PostgresRepository:
                     log.session_id,
                     log.request_id,
                     log.query,
+                    log.rewritten_query,
+                    log.scene,
                     self._dump_json(log.retrieval_docs_json),
+                    self._dump_json(log.prompt_json),
+                    self._dump_json(log.risk_json),
+                    self._dump_json(log.conversation_json),
                     log.response_summary,
                     log.action,
                     log.risk_level,
@@ -586,7 +608,12 @@ class PostgresRepository:
             session_id=row["session_id"],
             request_id=row["request_id"],
             query=row["query"],
+            rewritten_query=row.get("rewritten_query", ""),
+            scene=row.get("scene", ""),
             retrieval_docs_json=self._load_json(row["retrieval_docs_json"]),
+            prompt_json=self._load_json(row.get("prompt_json")),
+            risk_json=self._load_json(row.get("risk_json")),
+            conversation_json=self._load_json(row.get("conversation_json")),
             response_summary=row["response_summary"],
             action=row["action"],
             risk_level=row["risk_level"],

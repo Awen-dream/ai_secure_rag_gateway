@@ -153,6 +153,11 @@ class PostgresMetadataRepositoryIntegrationTest(unittest.TestCase):
         audit_logs = repository.list_audit_logs()
         self.assertEqual(len(audit_logs), 1)
         self.assertEqual(audit_logs[0].tenant_id, "t1")
+        self.assertEqual(audit_logs[0].query, "采购审批时限是什么？")
+        self.assertEqual(audit_logs[0].scene, "standard_qa")
+        self.assertIn("template_id", audit_logs[0].prompt_json)
+        self.assertIn("final_action", audit_logs[0].risk_json)
+        self.assertIn("rewritten_query", audit_logs[0].conversation_json)
 
 
 if __name__ == "__main__":

@@ -134,7 +134,7 @@ def list_audit_logs(
     _: UserContext = Depends(require_admin),
     service: AuditService = Depends(get_audit_service),
 ) -> list[dict]:
-    return [log.dict() for log in service.list_logs()]
+    return [log.model_dump() for log in service.list_logs()]
 
 
 @router.get("/retrieval/backends", response_model=list[RetrievalBackendInfo])

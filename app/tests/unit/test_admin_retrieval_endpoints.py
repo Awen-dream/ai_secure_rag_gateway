@@ -256,6 +256,40 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertIn("elasticsearch", payload["results"][0]["retrieval_sources"])
         self.assertIn("pgvector", payload["results"][0]["retrieval_sources"])
 
+    def test_admin_can_view_structured_audit_logs(self) -> None:
+        self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "采购流程",
+                "content": "采购流程说明。\n\n审批时限为2个工作日。",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        query = self.client.post(
+            "/api/v1/chat/query",
+            json={"query": "采购审批时限呢？"},
+            headers=self.headers,
+        )
+        self.assertEqual(query.status_code, 200)
+
+        audit = self.client.get("/api/v1/admin/audit", headers=self.headers)
+        self.assertEqual(audit.status_code, 200)
+        payload = audit.json()
+        self.assertEqual(len(payload), 1)
+        log = payload[0]
+        self.assertEqual(log["query"], "采购审批时限呢？")
+        self.assertEqual(log["scene"], "standard_qa")
+        self.assertIn("rewritten_query", log)
+        self.assertIn("prompt_json", log)
+        self.assertIn("risk_json", log)
+        self.assertIn("conversation_json", log)
+        self.assertGreaterEqual(len(log["retrieval_docs_json"]), 1)
+        self.assertIn("score", log["retrieval_docs_json"][0])
+        self.assertIn("template_id", log["prompt_json"])
+        self.assertIn("final_action", log["risk_json"])
+
 
 if __name__ == "__main__":
     unittest.main()

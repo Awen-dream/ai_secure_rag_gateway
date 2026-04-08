@@ -122,7 +122,12 @@ class SQLiteRepository:
                     session_id TEXT NOT NULL,
                     request_id TEXT NOT NULL,
                     query TEXT NOT NULL,
+                    rewritten_query TEXT NOT NULL DEFAULT '',
+                    scene TEXT NOT NULL DEFAULT '',
                     retrieval_docs_json TEXT NOT NULL,
+                    prompt_json TEXT NOT NULL DEFAULT '{}',
+                    risk_json TEXT NOT NULL DEFAULT '{}',
+                    conversation_json TEXT NOT NULL DEFAULT '{}',
                     response_summary TEXT NOT NULL,
                     action TEXT NOT NULL,
                     risk_level TEXT NOT NULL,
@@ -143,6 +148,19 @@ class SQLiteRepository:
                 connection.execute("ALTER TABLE chat_sessions ADD COLUMN active_topic TEXT NOT NULL DEFAULT ''")
             if "permission_signature" not in existing_session_columns:
                 connection.execute("ALTER TABLE chat_sessions ADD COLUMN permission_signature TEXT NOT NULL DEFAULT ''")
+            existing_audit_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(audit_logs)").fetchall()
+            }
+            if "rewritten_query" not in existing_audit_columns:
+                connection.execute("ALTER TABLE audit_logs ADD COLUMN rewritten_query TEXT NOT NULL DEFAULT ''")
+            if "scene" not in existing_audit_columns:
+                connection.execute("ALTER TABLE audit_logs ADD COLUMN scene TEXT NOT NULL DEFAULT ''")
+            if "prompt_json" not in existing_audit_columns:
+                connection.execute("ALTER TABLE audit_logs ADD COLUMN prompt_json TEXT NOT NULL DEFAULT '{}'")
+            if "risk_json" not in existing_audit_columns:
+                connection.execute("ALTER TABLE audit_logs ADD COLUMN risk_json TEXT NOT NULL DEFAULT '{}'")
+            if "conversation_json" not in existing_audit_columns:
+                connection.execute("ALTER TABLE audit_logs ADD COLUMN conversation_json TEXT NOT NULL DEFAULT '{}'")
 
     @staticmethod
     def _dump_json(value) -> str:
@@ -402,9 +420,10 @@ class SQLiteRepository:
             connection.execute(
                 """
                 INSERT INTO audit_logs (
-                    id, user_id, tenant_id, session_id, request_id, query, retrieval_docs_json,
+                    id, user_id, tenant_id, session_id, request_id, query, rewritten_query, scene,
+                    retrieval_docs_json, prompt_json, risk_json, conversation_json,
                     response_summary, action, risk_level, latency_ms, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     log.id,
@@ -413,7 +432,12 @@ class SQLiteRepository:
                     log.session_id,
                     log.request_id,
                     log.query,
+                    log.rewritten_query,
+                    log.scene,
                     self._dump_json(log.retrieval_docs_json),
+                    self._dump_json(log.prompt_json),
+                    self._dump_json(log.risk_json),
+                    self._dump_json(log.conversation_json),
                     log.response_summary,
                     log.action,
                     log.risk_level,
@@ -519,7 +543,12 @@ class SQLiteRepository:
             session_id=row["session_id"],
             request_id=row["request_id"],
             query=row["query"],
+            rewritten_query=row["rewritten_query"],
+            scene=row["scene"],
             retrieval_docs_json=self._load_json(row["retrieval_docs_json"]),
+            prompt_json=self._load_json(row["prompt_json"]),
+            risk_json=self._load_json(row["risk_json"]),
+            conversation_json=self._load_json(row["conversation_json"]),
             response_summary=row["response_summary"],
             action=row["action"],
             risk_level=row["risk_level"],

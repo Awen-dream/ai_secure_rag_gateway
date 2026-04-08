@@ -62,6 +62,7 @@ class ChatService:
         template = self.prompt_service.get_template(payload.scene)
         retrieved = self.retrieval_service.retrieve(user, conversation_context.rewritten_query)
         risk_action, risk_level = self.policy_engine.evaluate(user, conversation_context.rewritten_query, len(retrieved))
+        input_risk_action = risk_action
         citations = build_citations(retrieved)
         raw_answer = self._build_answer(
             query=conversation_context.rewritten_query,
@@ -98,12 +99,19 @@ class ChatService:
             user=user,
             session_id=session.id,
             request_id=request_id,
-            query=conversation_context.rewritten_query,
+            query=payload.query,
+            rewritten_query=conversation_context.rewritten_query,
+            scene=payload.scene,
             retrieved=retrieved,
             answer=answer,
             risk_level=risk_level,
             action=risk_action.value,
             latency_ms=latency_ms,
+            template=template,
+            conversation_context=conversation_context,
+            input_action=input_risk_action.value,
+            output_guard_result=guard_result,
+            validation_result=validation,
         )
 
         return ChatQueryResponse(
