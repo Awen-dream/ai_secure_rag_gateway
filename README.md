@@ -259,6 +259,18 @@ scripts/
 - 可通过 `retry` 入口重试失败文档
 - 飞书外部数据源导入：支持 `docx` 链接和 `wiki` 节点链接导入
 
+本地启动 ingestion worker：
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/run_document_ingestion_worker.py
+```
+
+或直接使用：
+
+```bash
+make run-ingestion-worker
+```
+
 当前外部数据源层已包含：
 
 - Feishu tenant token 交换

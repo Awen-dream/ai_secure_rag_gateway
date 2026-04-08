@@ -17,6 +17,24 @@ class ExternalDocumentContent:
     external_version: str | None = None
 
 
+@dataclass(frozen=True)
+class ExternalSourceItem:
+    """One externally discoverable source entry returned by a connector listing call."""
+
+    source: str
+    source_kind: str
+    external_document_id: str
+    title: str | None = None
+
+
+@dataclass(frozen=True)
+class ExternalSourcePage:
+    """One paginated connector listing response."""
+
+    items: list[ExternalSourceItem]
+    next_cursor: str | None = None
+
+
 class ExternalSourceConnector(Protocol):
     """Common connector contract used by source-specific sync services."""
 
@@ -27,6 +45,9 @@ class ExternalSourceConnector(Protocol):
 
     def fetch_document(self, source: str) -> ExternalDocumentContent:
         """Fetch one external document and return a normalized payload."""
+
+    def list_sources(self, cursor: str | None = None, limit: int = 20) -> ExternalSourcePage:
+        """List externally discoverable sources for incremental or paginated sync."""
 
     def health_check(self) -> dict:
         """Return connector health for admin diagnostics."""

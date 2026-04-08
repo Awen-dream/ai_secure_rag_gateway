@@ -39,6 +39,7 @@ from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import PolicyDefinition
 from app.domain.risk.services import PolicyEngine
 from app.domain.sources.schemas import FeishuImportRequest, FeishuImportResponse
+from app.domain.sources.schemas import FeishuBatchSyncRequest, FeishuBatchSyncResponse
 from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue
@@ -283,3 +284,24 @@ def import_feishu_source(
     """Import one Feishu docx or wiki-backed doc into the gateway document pipeline."""
 
     return service.import_source(payload, user)
+
+
+@router.post("/sources/feishu/sync", response_model=FeishuBatchSyncResponse)
+def sync_feishu_sources(
+    payload: FeishuBatchSyncRequest,
+    user: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> FeishuBatchSyncResponse:
+    """Synchronize multiple Feishu sources and return aggregate outcomes for admin workflows."""
+
+    return service.sync_sources(payload, user)
+
+
+@router.get("/sources/feishu/runs")
+def list_feishu_sync_runs(
+    user: UserContext = Depends(require_admin),
+    service: FeishuSourceSyncService = Depends(get_feishu_source_sync_service),
+) -> list[dict]:
+    """Return persisted Feishu sync runs for admin diagnostics and operations."""
+
+    return [run.model_dump() for run in service.list_sync_runs(user)]

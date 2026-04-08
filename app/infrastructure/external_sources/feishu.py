@@ -6,6 +6,8 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from app.infrastructure.external_sources.base import ExternalSourcePage
+
 
 @dataclass(frozen=True)
 class FeishuSourceReference:
@@ -100,6 +102,15 @@ class FeishuClient:
             source_uri=source,
             external_document_id=reference.token,
         )
+
+    def list_sources(self, cursor: str | None = None, limit: int = 20) -> ExternalSourcePage:
+        """List Feishu sources for paginated sync.
+
+        The gateway now supports cursor-based batch sync orchestration, but the real Feishu
+        collection listing flow is connector-specific and has not been wired yet.
+        """
+
+        raise RuntimeError("Feishu source listing is not configured for this connector yet.")
 
     def health_check(self) -> dict:
         """Return whether Feishu credentials are configured and tenant token retrieval succeeds."""

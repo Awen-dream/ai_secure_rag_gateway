@@ -7,6 +7,7 @@ from app.domain.chat.models import ChatMessage, ChatSession
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.prompts.models import PromptTemplate
 from app.domain.risk.models import PolicyDefinition
+from app.domain.sources.models import SourceSyncRun
 
 
 class MetadataRepository(Protocol):
@@ -83,4 +84,10 @@ class MetadataRepository(Protocol):
         ...
 
     def list_audit_logs(self) -> list[AuditLog]:
+        ...
+
+    def append_source_sync_run(self, run: SourceSyncRun) -> None:
+        ...
+
+    def list_source_sync_runs(self, tenant_id: str, provider: str) -> list[SourceSyncRun]:
         ...

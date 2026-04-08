@@ -13,6 +13,7 @@ from app.domain.chat.models import ChatMessage, ChatSession
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.prompts.models import PromptTemplate
 from app.domain.risk.models import PolicyDefinition
+from app.domain.sources.models import SourceSyncRun
 
 
 class PostgresRepository:
@@ -175,6 +176,29 @@ class PostgresRepository:
                     action TEXT NOT NULL,
                     risk_level TEXT NOT NULL,
                     latency_ms INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_sync_runs (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    triggered_by TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    continue_on_error BOOLEAN NOT NULL,
+                    request_json JSONB NOT NULL,
+                    result_items_json JSONB NOT NULL,
+                    total INTEGER NOT NULL,
+                    succeeded INTEGER NOT NULL,
+                    failed INTEGER NOT NULL,
+                    imported_new INTEGER NOT NULL,
+                    reused_current INTEGER NOT NULL,
+                    created_new_version INTEGER NOT NULL,
+                    queued INTEGER NOT NULL,
+                    status TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL
                 )
                 """
@@ -570,6 +594,48 @@ class PostgresRepository:
             rows = connection.execute("SELECT * FROM audit_logs ORDER BY created_at DESC").fetchall()
         return [self._row_to_audit_log(row) for row in rows]
 
+    def append_source_sync_run(self, run: SourceSyncRun) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO source_sync_runs (
+                    id, tenant_id, provider, triggered_by, mode, continue_on_error, request_json, result_items_json,
+                    total, succeeded, failed, imported_new, reused_current, created_new_version, queued, status, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    run.id,
+                    run.tenant_id,
+                    run.provider,
+                    run.triggered_by,
+                    run.mode,
+                    run.continue_on_error,
+                    self._dump_json(run.request_json),
+                    self._dump_json(run.result_items_json),
+                    run.total,
+                    run.succeeded,
+                    run.failed,
+                    run.imported_new,
+                    run.reused_current,
+                    run.created_new_version,
+                    run.queued,
+                    run.status,
+                    run.created_at,
+                ),
+            )
+
+    def list_source_sync_runs(self, tenant_id: str, provider: str) -> list[SourceSyncRun]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_sync_runs
+                WHERE tenant_id = %s AND provider = %s
+                ORDER BY created_at DESC
+                """,
+                (tenant_id, provider),
+            ).fetchall()
+        return [self._row_to_source_sync_run(row) for row in rows]
+
     def _row_to_document(self, row: dict) -> DocumentRecord:
         return DocumentRecord(
             id=row["id"],
@@ -675,5 +741,26 @@ class PostgresRepository:
             action=row["action"],
             risk_level=row["risk_level"],
             latency_ms=row["latency_ms"],
+            created_at=self._to_datetime(row["created_at"]),
+        )
+
+    def _row_to_source_sync_run(self, row: dict) -> SourceSyncRun:
+        return SourceSyncRun(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            provider=row["provider"],
+            triggered_by=row["triggered_by"],
+            mode=row["mode"],
+            continue_on_error=bool(row["continue_on_error"]),
+            request_json=self._load_json(row["request_json"]),
+            result_items_json=self._load_json(row["result_items_json"]),
+            total=row["total"],
+            succeeded=row["succeeded"],
+            failed=row["failed"],
+            imported_new=row["imported_new"],
+            reused_current=row["reused_current"],
+            created_new_version=row["created_new_version"],
+            queued=row["queued"],
+            status=row["status"],
             created_at=self._to_datetime(row["created_at"]),
         )

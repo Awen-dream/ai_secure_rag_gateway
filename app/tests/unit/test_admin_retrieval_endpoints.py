@@ -1,7 +1,53 @@
 import unittest
 from pathlib import Path
+from typing import Optional
 
 from fastapi.testclient import TestClient
+
+from app.infrastructure.external_sources.base import ExternalSourceItem, ExternalSourcePage
+
+
+class _FakeFeishuClient:
+    provider = "feishu"
+
+    def __init__(self) -> None:
+        self.listed_sources: list[str] = []
+
+    def parse_source(self, source: str):
+        from app.infrastructure.external_sources.feishu import FeishuSourceReference
+
+        token = source.rstrip("/").split("/")[-1]
+        return FeishuSourceReference(source_kind="wiki", token=token)
+
+    def fetch_document(self, source: str):
+        from app.infrastructure.external_sources.feishu import FeishuDocumentContent
+
+        token = source.rstrip("/").split("/")[-1]
+        return FeishuDocumentContent(
+            title=f"飞书文档 {token}",
+            content=f"# 飞书文档 {token}\n\n审批时限为3个工作日。",
+            source_type="markdown",
+            source_uri=source,
+            external_document_id=token,
+        )
+
+    def health_check(self) -> dict:
+        return {"backend": "feishu", "execute_enabled": True, "reachable": True}
+
+    def list_sources(self, cursor: Optional[str] = None, limit: int = 20) -> ExternalSourcePage:
+        start = int(cursor or "0")
+        selected = self.listed_sources[start : start + limit]
+        next_cursor = str(start + limit) if start + limit < len(self.listed_sources) else None
+        items = [
+            ExternalSourceItem(
+                source=source,
+                source_kind="wiki",
+                external_document_id=source.rstrip("/").split("/")[-1],
+                title=f"Listed {index}",
+            )
+            for index, source in enumerate(selected, start=start + 1)
+        ]
+        return ExternalSourcePage(items=items, next_cursor=next_cursor)
 
 
 class AdminRetrievalEndpointTest(unittest.TestCase):
@@ -80,6 +126,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         from app.main import app
 
         self.client = TestClient(app)
+        self.get_feishu_source_sync_service = get_feishu_source_sync_service
         self.headers = {
             "X-User-Id": "u1",
             "X-Tenant-Id": "t1",
@@ -119,6 +166,83 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["backend"], "feishu")
         self.assertFalse(payload["execute_enabled"])
+
+    def test_admin_can_batch_sync_feishu_sources(self) -> None:
+        self.get_feishu_source_sync_service().feishu_client = _FakeFeishuClient()
+        response = self.client.post(
+            "/api/v1/admin/sources/feishu/sync",
+            json={
+                "items": [
+                    {
+                        "source": "https://example.feishu.cn/wiki/wiki_token_1",
+                        "department_scope": ["engineering"],
+                        "async_mode": True,
+                    },
+                    {
+                        "source": "https://example.feishu.cn/wiki/wiki_token_2",
+                        "department_scope": ["engineering"],
+                        "async_mode": True,
+                    },
+                ],
+                "continue_on_error": True,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["listed_count"], 2)
+        self.assertEqual(payload["succeeded"], 2)
+        self.assertEqual(payload["failed"], 0)
+        self.assertEqual(len(payload["items"]), 2)
+
+    def test_admin_can_batch_sync_feishu_sources_via_connector_listing(self) -> None:
+        fake_client = _FakeFeishuClient()
+        fake_client.listed_sources = [
+            "https://example.feishu.cn/wiki/wiki_token_1",
+            "https://example.feishu.cn/wiki/wiki_token_2",
+            "https://example.feishu.cn/wiki/wiki_token_3",
+        ]
+        self.get_feishu_source_sync_service().feishu_client = fake_client
+
+        response = self.client.post(
+            "/api/v1/admin/sources/feishu/sync",
+            json={
+                "cursor": "0",
+                "limit": 2,
+                "default_department_scope": ["engineering"],
+                "default_async_mode": True,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["listed_count"], 2)
+        self.assertEqual(payload["next_cursor"], "2")
+        self.assertEqual(payload["succeeded"], 2)
+
+    def test_admin_can_view_feishu_sync_runs(self) -> None:
+        self.get_feishu_source_sync_service().feishu_client = _FakeFeishuClient()
+        self.client.post(
+            "/api/v1/admin/sources/feishu/sync",
+            json={
+                "items": [
+                    {
+                        "source": "https://example.feishu.cn/wiki/wiki_token_1",
+                        "department_scope": ["engineering"],
+                        "async_mode": True,
+                    }
+                ]
+            },
+            headers=self.headers,
+        )
+        response = self.client.get("/api/v1/admin/sources/feishu/runs", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["provider"], "feishu")
+        self.assertEqual(payload[0]["status"], "success")
 
     def test_admin_can_enable_preview_and_validate_prompt_templates(self) -> None:
         created = self.client.post(

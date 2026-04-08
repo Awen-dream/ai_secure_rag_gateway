@@ -83,6 +83,16 @@ class FeishuClientTest(unittest.TestCase):
         self.assertEqual(document.title, "采购流程")
         self.assertIn("审批时限为2个工作日", document.content)
 
+    def test_list_sources_is_explicitly_not_configured_yet(self) -> None:
+        client = FeishuClient(
+            base_url="https://open.feishu.cn/open-apis",
+            app_id="app_id",
+            app_secret="app_secret",
+        )
+
+        with self.assertRaises(RuntimeError):
+            client.list_sources(cursor=None, limit=20)
+
 
 if __name__ == "__main__":
     unittest.main()

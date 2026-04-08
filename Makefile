@@ -38,7 +38,7 @@ run:
 	$(PYTHON) -m uvicorn app.main:app --reload
 
 run-ingestion-worker:
-	$(PYTHON) scripts/run_document_ingestion_worker.py
+	PYTHONPATH=. $(PYTHON) scripts/run_document_ingestion_worker.py
 
 compile:
 	PYTHONPYCACHEPREFIX=/tmp/pycache $(PYTHON) -m py_compile $$(find app -name '*.py' -print) main.py

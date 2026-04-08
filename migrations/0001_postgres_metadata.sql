@@ -104,3 +104,23 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     latency_ms INTEGER NOT NULL,
     created_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS source_sync_runs (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    triggered_by TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    continue_on_error BOOLEAN NOT NULL,
+    request_json JSONB NOT NULL,
+    result_items_json JSONB NOT NULL,
+    total INTEGER NOT NULL,
+    succeeded INTEGER NOT NULL,
+    failed INTEGER NOT NULL,
+    imported_new INTEGER NOT NULL,
+    reused_current INTEGER NOT NULL,
+    created_new_version INTEGER NOT NULL,
+    queued INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);

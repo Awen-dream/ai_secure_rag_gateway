@@ -18,7 +18,6 @@ from app.domain.risk.services import PolicyEngine
 from app.domain.sources.services import FeishuSourceSyncService
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.db.repositories.base import MetadataRepository
-from app.infrastructure.db.repositories.postgres import PostgresRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 from app.infrastructure.external_sources.feishu import FeishuClient
 from app.infrastructure.llm.openai_client import OpenAIClient
@@ -34,6 +33,8 @@ def get_repository() -> MetadataRepository:
     """Return the configured metadata repository used by services in the current process."""
 
     if settings.repository_backend == "postgres":
+        from app.infrastructure.db.repositories.postgres import PostgresRepository
+
         if not settings.postgres_dsn:
             raise ValueError("APP_POSTGRES_DSN is required when APP_REPOSITORY_BACKEND=postgres")
         return PostgresRepository(
@@ -278,6 +279,7 @@ def get_feishu_source_sync_service() -> FeishuSourceSyncService:
 
     return FeishuSourceSyncService(
         feishu_client=get_feishu_client(),
+        repository=get_repository(),
         document_service=get_document_service(),
         task_queue=get_document_task_queue(),
         ingestion_orchestrator=get_document_ingestion_orchestrator(),
