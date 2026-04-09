@@ -35,4 +35,5 @@ def evaluation_metrics(
     trend = service.build_trend_summary(current_run=run)
     payload["trend"] = trend.model_dump()
     payload["alerts"] = [alert.model_dump() for alert in trend.alerts]
+    payload["release_readiness"] = service.build_release_readiness_report().model_dump()
     return payload

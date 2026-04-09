@@ -165,6 +165,7 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertEqual(result.summary.retrieval_hit_rate, 1.0)
         self.assertEqual(result.summary.answer_match_rate, 1.0)
         self.assertEqual(result.summary.answer_valid_rate, 1.0)
+        self.assertEqual(result.quality_gate.status, "pass")
         self.assertEqual(result.cases[0].matched_doc_ids, ["doc_finance"])
 
     def test_run_persists_and_can_be_listed(self) -> None:
@@ -191,11 +192,14 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertEqual(run.dataset_size, 1)
         self.assertEqual(len(run.diffs), 1)
         self.assertEqual(run.diffs[0].sample_id, "case_1")
+        self.assertEqual(run.winner, "tie")
+        self.assertGreaterEqual(run.ties, 1)
         self.assertIsNotNone(loaded)
         assert loaded is not None
         self.assertEqual(loaded["mode"], "shadow")
         self.assertIn("primary_summary", loaded)
         self.assertIn("shadow_summary", loaded)
+        self.assertIn("winner", loaded)
 
     def test_build_trend_summary_detects_regression_alerts(self) -> None:
         service = self._build_service()
@@ -243,8 +247,25 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertEqual(trend.baseline_run_id, "eval_baseline")
         self.assertLess(trend.deltas["retrieval_hit_rate"], 0)
         self.assertGreater(trend.deltas["average_latency_ms"], 0)
+        self.assertEqual(trend.quality_gate.status, "block")
         self.assertTrue(any(alert.metric == "retrieval_hit_rate" for alert in trend.alerts))
         self.assertTrue(any(alert.metric == "average_latency_ms" for alert in trend.alerts))
+
+    def test_build_shadow_and_release_reports(self) -> None:
+        service = self._build_service()
+        offline_run = service.run()
+        shadow_run = service.run_shadow()
+
+        shadow_report = service.build_shadow_report()
+        release_report = service.build_release_readiness_report()
+
+        self.assertEqual(shadow_report.latest_run_id, shadow_run.run_id)
+        self.assertEqual(shadow_report.winner, "tie")
+        self.assertEqual(shadow_report.recommendation, "keep_primary")
+        self.assertEqual(release_report.latest_offline_run_id, offline_run.run_id)
+        self.assertEqual(release_report.latest_shadow_run_id, shadow_run.run_id)
+        self.assertEqual(release_report.decision, "ready")
+        self.assertEqual(release_report.quality_gate.status, "pass")
 
 
 if __name__ == "__main__":

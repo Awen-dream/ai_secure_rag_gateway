@@ -9,12 +9,15 @@ from app.application.prompting.builder import PromptBuilderService
 from app.domain.auth.models import UserContext
 from app.domain.evaluation.models import (
     EvalCaseResult,
+    EvalQualityGate,
     EvalRegressionAlert,
     EvalRunListItem,
     EvalRunResult,
     EvalRunSummary,
     EvalTrendSummary,
     EvalSample,
+    ReleaseReadinessReport,
+    ShadowReportSummary,
     ShadowEvalCaseDiff,
     ShadowEvalRunResult,
 )
@@ -57,6 +60,77 @@ class OfflineEvaluationService:
     def get_run(self, run_id: str) -> dict | None:
         return self.run_store.load_run(run_id)
 
+    def build_shadow_report(self) -> ShadowReportSummary:
+        latest_shadow_payload = self._load_latest_run_payload(mode="shadow")
+        if latest_shadow_payload is None:
+            return ShadowReportSummary()
+
+        winner = str(latest_shadow_payload.get("winner", "unavailable"))
+        changed_cases = sum(1 for item in latest_shadow_payload.get("diffs", []) if item.get("changed"))
+        recommendation = "review"
+        if winner == "primary":
+            recommendation = "keep_primary"
+        elif winner == "shadow":
+            recommendation = "investigate_shadow"
+        elif winner == "tie":
+            recommendation = "keep_primary"
+
+        return ShadowReportSummary(
+            latest_run_id=str(latest_shadow_payload.get("run_id", "")),
+            winner=winner,
+            recommendation=recommendation,
+            primary_wins=int(latest_shadow_payload.get("primary_wins", 0)),
+            shadow_wins=int(latest_shadow_payload.get("shadow_wins", 0)),
+            ties=int(latest_shadow_payload.get("ties", 0)),
+            changed_cases=changed_cases,
+            winner_reasons=list(latest_shadow_payload.get("winner_reasons", [])),
+        )
+
+    def build_release_readiness_report(self) -> ReleaseReadinessReport:
+        latest_offline_payload = self._load_latest_run_payload(mode="offline")
+        if latest_offline_payload is None:
+            return ReleaseReadinessReport(
+                generated_at=utcnow(),
+                decision="hold",
+                reasons=["No offline evaluation run is available."],
+            )
+
+        latest_offline_run = EvalRunResult.model_validate(latest_offline_payload)
+        trend = self.build_trend_summary(current_run=latest_offline_run)
+        shadow_report = self.build_shadow_report()
+
+        decision = "ready"
+        reasons: list[str] = []
+        if latest_offline_run.quality_gate.status == "block" or trend.quality_gate.status == "block":
+            decision = "hold"
+            reasons.append("Offline evaluation quality gate is blocking release.")
+        elif latest_offline_run.quality_gate.status == "warning" or trend.quality_gate.status == "warning":
+            decision = "review"
+            reasons.append("Offline evaluation quality gate requires review.")
+
+        if shadow_report.winner == "shadow":
+            if decision == "ready":
+                decision = "review"
+            reasons.append("Shadow baseline currently outperforms the primary stack.")
+        elif shadow_report.winner == "unavailable":
+            if decision == "ready":
+                decision = "review"
+            reasons.append("No shadow evaluation run is available.")
+
+        if not reasons:
+            reasons.append("Offline evaluation and shadow comparison both meet release expectations.")
+
+        return ReleaseReadinessReport(
+            generated_at=utcnow(),
+            decision=decision,
+            latest_offline_run_id=latest_offline_run.run_id,
+            latest_shadow_run_id=shadow_report.latest_run_id,
+            quality_gate=latest_offline_run.quality_gate,
+            trend=trend,
+            shadow_report=shadow_report,
+            reasons=reasons,
+        )
+
     def build_trend_summary(
         self,
         current_run: EvalRunResult | None = None,
@@ -78,12 +152,14 @@ class OfflineEvaluationService:
         baseline_summary = self._summary_from_dict(baseline_item.summary) if baseline_item else None
         deltas = self._build_deltas(current_summary, baseline_summary)
         alerts = self._build_regression_alerts(current_summary, baseline_summary, deltas)
+        quality_gate = self._build_quality_gate(current_summary, alerts)
         return EvalTrendSummary(
             current_run_id=current_run_id,
             baseline_run_id=baseline_item.run_id if baseline_item else "",
             compared_runs=1 + (1 if baseline_item else 0) if current_run_id else (1 if baseline_item else 0),
             current_summary=current_summary,
             baseline_summary=baseline_summary,
+            quality_gate=quality_gate,
             deltas=deltas,
             alerts=alerts,
         )
@@ -95,6 +171,7 @@ class OfflineEvaluationService:
             samples = samples[:limit]
 
         case_results = [self._run_case(sample) for sample in samples]
+        summary = self._summarize(case_results)
         finished_at = utcnow()
         run = EvalRunResult(
             run_id=f"eval_{uuid.uuid4().hex[:12]}",
@@ -102,7 +179,8 @@ class OfflineEvaluationService:
             dataset_size=len(samples),
             started_at=started_at,
             finished_at=finished_at,
-            summary=self._summarize(case_results),
+            summary=summary,
+            quality_gate=self._build_quality_gate(summary),
             cases=case_results,
         )
         if persist:
@@ -118,6 +196,8 @@ class OfflineEvaluationService:
         primary_cases = [self._run_case(sample, retrieval_service=self.retrieval_service) for sample in samples]
         shadow_service = self._build_shadow_retrieval_service()
         shadow_cases = [self._run_case(sample, retrieval_service=shadow_service) for sample in samples]
+        primary_summary = self._summarize(primary_cases)
+        shadow_summary = self._summarize(shadow_cases)
         diffs = [
             ShadowEvalCaseDiff(
                 sample_id=sample.id,
@@ -137,6 +217,11 @@ class OfflineEvaluationService:
             )
             for sample, primary, shadow in zip(samples, primary_cases, shadow_cases)
         ]
+        winner, winner_reasons, primary_wins, shadow_wins, ties = self._select_shadow_winner(
+            primary_summary,
+            shadow_summary,
+            diffs,
+        )
         finished_at = utcnow()
         run = ShadowEvalRunResult(
             run_id=f"shadow_{uuid.uuid4().hex[:12]}",
@@ -144,8 +229,13 @@ class OfflineEvaluationService:
             dataset_size=len(samples),
             started_at=started_at,
             finished_at=finished_at,
-            primary_summary=self._summarize(primary_cases),
-            shadow_summary=self._summarize(shadow_cases),
+            primary_summary=primary_summary,
+            shadow_summary=shadow_summary,
+            winner=winner,
+            winner_reasons=winner_reasons,
+            primary_wins=primary_wins,
+            shadow_wins=shadow_wins,
+            ties=ties,
             diffs=diffs,
         )
         if persist:
@@ -228,6 +318,15 @@ class OfflineEvaluationService:
             query_planning=self.retrieval_service.query_planning,
             recall_planning=self.retrieval_service.recall_planning,
         )
+
+    def _load_latest_run_payload(self, mode: str) -> dict | None:
+        for item in self.run_store.list_runs(limit=50):
+            if item.mode != mode:
+                continue
+            payload = self.run_store.load_run(item.run_id)
+            if payload is not None:
+                return payload
+        return None
 
     @staticmethod
     def _summarize(cases: list[EvalCaseResult]) -> EvalRunSummary:
@@ -328,3 +427,98 @@ class OfflineEvaluationService:
                 )
             )
         return alerts
+
+    @staticmethod
+    def _build_quality_gate(
+        summary: EvalRunSummary,
+        alerts: list[EvalRegressionAlert] | None = None,
+    ) -> EvalQualityGate:
+        alerts = alerts or []
+        if summary.total_cases == 0:
+            return EvalQualityGate(
+                status="warning",
+                reasons=["No evaluation cases were executed."],
+                blocking_metrics=[],
+            )
+
+        status = "pass"
+        reasons: list[str] = []
+        blocking_metrics: list[str] = []
+        evidence_hit_rate = max(summary.retrieval_hit_rate, summary.title_hit_rate)
+
+        if evidence_hit_rate < 0.8:
+            status = "block"
+            blocking_metrics.append("evidence_hit_rate")
+            reasons.append("Evidence hit rate is below 0.80.")
+        elif evidence_hit_rate < 0.9:
+            status = "warning" if status == "pass" else status
+            reasons.append("Evidence hit rate is below the target 0.90.")
+
+        if summary.answer_valid_rate < 0.95:
+            status = "block"
+            blocking_metrics.append("answer_valid_rate")
+            reasons.append("answer_valid_rate is below 0.95.")
+
+        if summary.answer_match_rate < 0.75:
+            status = "block"
+            blocking_metrics.append("answer_match_rate")
+            reasons.append("answer_match_rate is below 0.75.")
+        elif summary.answer_match_rate < 0.85:
+            status = "warning" if status == "pass" else status
+            reasons.append("answer_match_rate is below the target 0.85.")
+
+        if any(alert.severity == "critical" for alert in alerts):
+            status = "block"
+            blocking_metrics.extend(alert.metric for alert in alerts if alert.severity == "critical")
+            reasons.append("Critical regression alerts were detected.")
+        elif alerts and status == "pass":
+            status = "warning"
+            reasons.append("Regression alerts were detected.")
+
+        return EvalQualityGate(
+            status=status,
+            reasons=list(dict.fromkeys(reasons)),
+            blocking_metrics=list(dict.fromkeys(blocking_metrics)),
+        )
+
+    @staticmethod
+    def _select_shadow_winner(
+        primary_summary: EvalRunSummary,
+        shadow_summary: EvalRunSummary,
+        diffs: list[ShadowEvalCaseDiff],
+    ) -> tuple[str, list[str], int, int, int]:
+        primary_wins = 0
+        shadow_wins = 0
+        ties = 0
+        reasons: list[str] = []
+        metric_pairs = (
+            ("retrieval_hit_rate", primary_summary.retrieval_hit_rate, shadow_summary.retrieval_hit_rate, True),
+            ("title_hit_rate", primary_summary.title_hit_rate, shadow_summary.title_hit_rate, True),
+            ("answer_match_rate", primary_summary.answer_match_rate, shadow_summary.answer_match_rate, True),
+            ("answer_valid_rate", primary_summary.answer_valid_rate, shadow_summary.answer_valid_rate, True),
+            ("average_latency_ms", primary_summary.average_latency_ms, shadow_summary.average_latency_ms, False),
+        )
+        for metric, primary_value, shadow_value, higher_is_better in metric_pairs:
+            if round(primary_value, 3) == round(shadow_value, 3):
+                ties += 1
+                continue
+            primary_better = primary_value > shadow_value if higher_is_better else primary_value < shadow_value
+            if primary_better:
+                primary_wins += 1
+                reasons.append(f"primary leads on {metric}.")
+            else:
+                shadow_wins += 1
+                reasons.append(f"shadow leads on {metric}.")
+
+        changed_cases = sum(1 for diff in diffs if diff.changed)
+        if changed_cases:
+            reasons.append(f"{changed_cases} cases changed after shadow comparison.")
+
+        if primary_wins > shadow_wins:
+            winner = "primary"
+        elif shadow_wins > primary_wins:
+            winner = "shadow"
+        else:
+            winner = "tie"
+            reasons.append("Primary and shadow are effectively tied on tracked metrics.")
+        return winner, reasons[:6], primary_wins, shadow_wins, ties

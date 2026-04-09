@@ -30,7 +30,15 @@ from app.api.deps import (
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
-from app.domain.evaluation.models import EvalRunListItem, EvalRunResult, EvalSample, EvalTrendSummary, ShadowEvalRunResult
+from app.domain.evaluation.models import (
+    EvalRunListItem,
+    EvalRunResult,
+    EvalSample,
+    EvalTrendSummary,
+    ReleaseReadinessReport,
+    ShadowEvalRunResult,
+    ShadowReportSummary,
+)
 from app.domain.prompts.models import (
     PromptPreviewRequest,
     PromptPreviewResponse,
@@ -135,6 +143,26 @@ def get_evaluation_trend(
     """Return evaluation trend summary and regression alerts based on persisted offline runs."""
 
     return service.build_trend_summary(history_limit=history_limit)
+
+
+@router.get("/evaluation/release-readiness", response_model=ReleaseReadinessReport)
+def get_release_readiness_report(
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> ReleaseReadinessReport:
+    """Return the release-readiness decision based on latest offline and shadow evaluation runs."""
+
+    return service.build_release_readiness_report()
+
+
+@router.get("/evaluation/shadow-report", response_model=ShadowReportSummary)
+def get_shadow_report(
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> ShadowReportSummary:
+    """Return the latest shadow comparison summary for primary versus baseline retrieval."""
+
+    return service.build_shadow_report()
 
 
 @router.get("/prompts", response_model=list[PromptTemplate])

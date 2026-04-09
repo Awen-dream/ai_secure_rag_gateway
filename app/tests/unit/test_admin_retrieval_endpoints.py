@@ -650,6 +650,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["summary"]["total_cases"], 1)
         self.assertEqual(payload["summary"]["title_hit_rate"], 1.0)
         self.assertTrue(payload["run_id"].startswith("eval_"))
+        self.assertEqual(payload["quality_gate"]["status"], "pass")
 
         runs = self.client.get("/api/v1/admin/evaluation/runs", headers=self.headers)
         self.assertEqual(runs.status_code, 200)
@@ -698,6 +699,8 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(len(payload["diffs"]), 1)
         self.assertIn("primary_summary", payload)
         self.assertIn("shadow_summary", payload)
+        self.assertIn(payload["winner"], {"primary", "shadow", "tie"})
+        self.assertIn("winner_reasons", payload)
 
         runs = self.client.get("/api/v1/admin/evaluation/runs", headers=self.headers)
         self.assertEqual(runs.status_code, 200)
@@ -736,6 +739,8 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["total_cases"], 1)
         self.assertIn("trend", payload)
         self.assertIn("alerts", payload)
+        self.assertIn("quality_gate", payload["trend"])
+        self.assertIn("release_readiness", payload)
 
     def test_admin_can_view_evaluation_trend_and_alerts(self) -> None:
         from app.domain.evaluation.models import EvalRunResult, EvalRunSummary
@@ -788,7 +793,65 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["current_run_id"], "eval_latest")
         self.assertEqual(payload["baseline_run_id"], "eval_baseline")
         self.assertLess(payload["deltas"]["retrieval_hit_rate"], 0)
+        self.assertEqual(payload["quality_gate"]["status"], "block")
         self.assertTrue(any(alert["metric"] == "retrieval_hit_rate" for alert in payload["alerts"]))
+
+    def test_admin_can_view_shadow_and_release_reports(self) -> None:
+        from app.domain.evaluation.models import EvalRunResult, EvalRunSummary, ShadowEvalRunResult
+
+        run_store = self.get_eval_run_store()
+        run_store.save_run(
+            "eval_latest",
+            EvalRunResult(
+                run_id="eval_latest",
+                mode="offline",
+                dataset_size=1,
+                started_at=datetime(2026, 1, 2, 10, 0, 0),
+                finished_at=datetime(2026, 1, 2, 10, 1, 0),
+                summary=EvalRunSummary(
+                    total_cases=1,
+                    retrieval_hit_rate=1.0,
+                    title_hit_rate=1.0,
+                    answer_match_rate=1.0,
+                    answer_valid_rate=1.0,
+                    average_latency_ms=120.0,
+                    average_retrieved_chunks=2.0,
+                ),
+                quality_gate={"status": "pass", "reasons": [], "blocking_metrics": []},
+                cases=[],
+            ).model_dump(mode="json"),
+        )
+        run_store.save_run(
+            "shadow_latest",
+            ShadowEvalRunResult(
+                run_id="shadow_latest",
+                mode="shadow",
+                dataset_size=1,
+                started_at=datetime(2026, 1, 2, 11, 0, 0),
+                finished_at=datetime(2026, 1, 2, 11, 1, 0),
+                primary_summary=EvalRunSummary(total_cases=1, retrieval_hit_rate=1.0, title_hit_rate=1.0),
+                shadow_summary=EvalRunSummary(total_cases=1, retrieval_hit_rate=1.0, title_hit_rate=1.0),
+                winner="primary",
+                winner_reasons=["primary leads on average_latency_ms."],
+                primary_wins=1,
+                shadow_wins=0,
+                ties=4,
+                diffs=[],
+            ).model_dump(mode="json"),
+        )
+
+        shadow_response = self.client.get("/api/v1/admin/evaluation/shadow-report", headers=self.headers)
+        self.assertEqual(shadow_response.status_code, 200)
+        shadow_payload = shadow_response.json()
+        self.assertEqual(shadow_payload["latest_run_id"], "shadow_latest")
+        self.assertEqual(shadow_payload["winner"], "primary")
+
+        release_response = self.client.get("/api/v1/admin/evaluation/release-readiness", headers=self.headers)
+        self.assertEqual(release_response.status_code, 200)
+        release_payload = release_response.json()
+        self.assertEqual(release_payload["latest_offline_run_id"], "eval_latest")
+        self.assertEqual(release_payload["latest_shadow_run_id"], "shadow_latest")
+        self.assertEqual(release_payload["decision"], "ready")
 
 
 if __name__ == "__main__":

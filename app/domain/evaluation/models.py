@@ -50,6 +50,12 @@ class EvalRunSummary(BaseModel):
     average_retrieved_chunks: float = 0.0
 
 
+class EvalQualityGate(BaseModel):
+    status: str = "pass"
+    reasons: list[str] = Field(default_factory=list)
+    blocking_metrics: list[str] = Field(default_factory=list)
+
+
 class EvalRunResult(BaseModel):
     run_id: str = ""
     mode: str = "offline"
@@ -57,6 +63,7 @@ class EvalRunResult(BaseModel):
     started_at: datetime
     finished_at: datetime
     summary: EvalRunSummary
+    quality_gate: EvalQualityGate = Field(default_factory=EvalQualityGate)
     cases: list[EvalCaseResult] = Field(default_factory=list)
 
 
@@ -80,6 +87,11 @@ class ShadowEvalRunResult(BaseModel):
     finished_at: datetime
     primary_summary: EvalRunSummary
     shadow_summary: EvalRunSummary
+    winner: str = "tie"
+    winner_reasons: list[str] = Field(default_factory=list)
+    primary_wins: int = 0
+    shadow_wins: int = 0
+    ties: int = 0
     diffs: list[ShadowEvalCaseDiff] = Field(default_factory=list)
 
 
@@ -108,5 +120,28 @@ class EvalTrendSummary(BaseModel):
     compared_runs: int = 0
     current_summary: EvalRunSummary = Field(default_factory=EvalRunSummary)
     baseline_summary: Optional[EvalRunSummary] = None
+    quality_gate: EvalQualityGate = Field(default_factory=EvalQualityGate)
     deltas: dict = Field(default_factory=dict)
     alerts: list[EvalRegressionAlert] = Field(default_factory=list)
+
+
+class ShadowReportSummary(BaseModel):
+    latest_run_id: str = ""
+    winner: str = "unavailable"
+    recommendation: str = "unavailable"
+    primary_wins: int = 0
+    shadow_wins: int = 0
+    ties: int = 0
+    changed_cases: int = 0
+    winner_reasons: list[str] = Field(default_factory=list)
+
+
+class ReleaseReadinessReport(BaseModel):
+    generated_at: datetime
+    decision: str = "hold"
+    latest_offline_run_id: str = ""
+    latest_shadow_run_id: str = ""
+    quality_gate: EvalQualityGate = Field(default_factory=EvalQualityGate)
+    trend: EvalTrendSummary = Field(default_factory=EvalTrendSummary)
+    shadow_report: ShadowReportSummary = Field(default_factory=ShadowReportSummary)
+    reasons: list[str] = Field(default_factory=list)
