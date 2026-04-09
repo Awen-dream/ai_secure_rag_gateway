@@ -30,7 +30,7 @@ from app.api.deps import (
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
-from app.domain.evaluation.models import EvalRunListItem, EvalRunResult, EvalSample, ShadowEvalRunResult
+from app.domain.evaluation.models import EvalRunListItem, EvalRunResult, EvalSample, EvalTrendSummary, ShadowEvalRunResult
 from app.domain.prompts.models import (
     PromptPreviewRequest,
     PromptPreviewResponse,
@@ -124,6 +124,17 @@ def get_evaluation_run(
     if payload is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation run not found.")
     return payload
+
+
+@router.get("/evaluation/trend", response_model=EvalTrendSummary)
+def get_evaluation_trend(
+    history_limit: int = Query(10, ge=2, le=100),
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalTrendSummary:
+    """Return evaluation trend summary and regression alerts based on persisted offline runs."""
+
+    return service.build_trend_summary(history_limit=history_limit)
 
 
 @router.get("/prompts", response_model=list[PromptTemplate])

@@ -1,10 +1,11 @@
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from app.application.context.builder import AssembledContext
 from app.application.evaluation.service import OfflineEvaluationService
 from app.domain.citations.services import Citation
-from app.domain.evaluation.models import EvalSample
+from app.domain.evaluation.models import EvalRunResult, EvalRunSummary, EvalSample
 from app.domain.prompts.models import PromptTemplate, PromptValidationResult, RenderedPrompt
 from app.domain.risk.models import RiskAction
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
@@ -195,6 +196,55 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertEqual(loaded["mode"], "shadow")
         self.assertIn("primary_summary", loaded)
         self.assertIn("shadow_summary", loaded)
+
+    def test_build_trend_summary_detects_regression_alerts(self) -> None:
+        service = self._build_service()
+        service.run_store.save_run(
+            "eval_baseline",
+            EvalRunResult(
+                run_id="eval_baseline",
+                mode="offline",
+                dataset_size=1,
+                started_at=datetime(2026, 1, 1, 10, 0, 0),
+                finished_at=datetime(2026, 1, 1, 10, 1, 0),
+                summary=EvalRunSummary(
+                    total_cases=1,
+                    retrieval_hit_rate=1.0,
+                    title_hit_rate=1.0,
+                    answer_match_rate=1.0,
+                    answer_valid_rate=1.0,
+                    average_latency_ms=100.0,
+                    average_retrieved_chunks=2.0,
+                ),
+                cases=[],
+            ).model_dump(mode="json"),
+        )
+        current_run = EvalRunResult(
+            run_id="eval_current",
+            mode="offline",
+            dataset_size=1,
+            started_at=datetime(2026, 1, 2, 10, 0, 0),
+            finished_at=datetime(2026, 1, 2, 10, 1, 0),
+            summary=EvalRunSummary(
+                total_cases=1,
+                retrieval_hit_rate=0.8,
+                title_hit_rate=0.9,
+                answer_match_rate=0.9,
+                answer_valid_rate=1.0,
+                average_latency_ms=250.0,
+                average_retrieved_chunks=2.0,
+            ),
+            cases=[],
+        )
+
+        trend = service.build_trend_summary(current_run=current_run)
+
+        self.assertEqual(trend.current_run_id, "eval_current")
+        self.assertEqual(trend.baseline_run_id, "eval_baseline")
+        self.assertLess(trend.deltas["retrieval_hit_rate"], 0)
+        self.assertGreater(trend.deltas["average_latency_ms"], 0)
+        self.assertTrue(any(alert.metric == "retrieval_hit_rate" for alert in trend.alerts))
+        self.assertTrue(any(alert.metric == "average_latency_ms" for alert in trend.alerts))
 
 
 if __name__ == "__main__":

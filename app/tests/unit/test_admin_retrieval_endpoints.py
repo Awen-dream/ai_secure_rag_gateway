@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -733,6 +734,61 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["total_cases"], 1)
+        self.assertIn("trend", payload)
+        self.assertIn("alerts", payload)
+
+    def test_admin_can_view_evaluation_trend_and_alerts(self) -> None:
+        from app.domain.evaluation.models import EvalRunResult, EvalRunSummary
+
+        run_store = self.get_eval_run_store()
+        run_store.save_run(
+            "eval_latest",
+            EvalRunResult(
+                run_id="eval_latest",
+                mode="offline",
+                dataset_size=1,
+                started_at=datetime(2026, 1, 2, 10, 0, 0),
+                finished_at=datetime(2026, 1, 2, 10, 1, 0),
+                summary=EvalRunSummary(
+                    total_cases=1,
+                    retrieval_hit_rate=0.8,
+                    title_hit_rate=0.8,
+                    answer_match_rate=0.8,
+                    answer_valid_rate=1.0,
+                    average_latency_ms=240.0,
+                    average_retrieved_chunks=2.0,
+                ),
+                cases=[],
+            ).model_dump(mode="json"),
+        )
+        run_store.save_run(
+            "eval_baseline",
+            EvalRunResult(
+                run_id="eval_baseline",
+                mode="offline",
+                dataset_size=1,
+                started_at=datetime(2026, 1, 1, 10, 0, 0),
+                finished_at=datetime(2026, 1, 1, 10, 1, 0),
+                summary=EvalRunSummary(
+                    total_cases=1,
+                    retrieval_hit_rate=1.0,
+                    title_hit_rate=1.0,
+                    answer_match_rate=1.0,
+                    answer_valid_rate=1.0,
+                    average_latency_ms=100.0,
+                    average_retrieved_chunks=2.0,
+                ),
+                cases=[],
+            ).model_dump(mode="json"),
+        )
+
+        response = self.client.get("/api/v1/admin/evaluation/trend", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["current_run_id"], "eval_latest")
+        self.assertEqual(payload["baseline_run_id"], "eval_baseline")
+        self.assertLess(payload["deltas"]["retrieval_hit_rate"], 0)
+        self.assertTrue(any(alert["metric"] == "retrieval_hit_rate" for alert in payload["alerts"]))
 
 
 if __name__ == "__main__":

@@ -30,4 +30,9 @@ def evaluation_metrics(
     _: UserContext = Depends(require_admin),
     service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
 ) -> dict:
-    return service.run().summary.model_dump()
+    run = service.run(persist=False)
+    payload = run.summary.model_dump()
+    trend = service.build_trend_summary(current_run=run)
+    payload["trend"] = trend.model_dump()
+    payload["alerts"] = [alert.model_dump() for alert in trend.alerts]
+    return payload

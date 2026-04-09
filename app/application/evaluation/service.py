@@ -9,9 +9,11 @@ from app.application.prompting.builder import PromptBuilderService
 from app.domain.auth.models import UserContext
 from app.domain.evaluation.models import (
     EvalCaseResult,
+    EvalRegressionAlert,
     EvalRunListItem,
     EvalRunResult,
     EvalRunSummary,
+    EvalTrendSummary,
     EvalSample,
     ShadowEvalCaseDiff,
     ShadowEvalRunResult,
@@ -54,6 +56,37 @@ class OfflineEvaluationService:
 
     def get_run(self, run_id: str) -> dict | None:
         return self.run_store.load_run(run_id)
+
+    def build_trend_summary(
+        self,
+        current_run: EvalRunResult | None = None,
+        history_limit: int = 10,
+    ) -> EvalTrendSummary:
+        offline_runs = [item for item in self.run_store.list_runs(limit=history_limit) if item.mode == "offline"]
+        baseline_item = offline_runs[0] if offline_runs else None
+        if current_run is None and baseline_item is not None:
+            current_summary = self._summary_from_dict(baseline_item.summary)
+            current_run_id = baseline_item.run_id
+            baseline_item = offline_runs[1] if len(offline_runs) > 1 else None
+        elif current_run is not None:
+            current_summary = current_run.summary
+            current_run_id = current_run.run_id
+        else:
+            current_summary = EvalRunSummary()
+            current_run_id = ""
+
+        baseline_summary = self._summary_from_dict(baseline_item.summary) if baseline_item else None
+        deltas = self._build_deltas(current_summary, baseline_summary)
+        alerts = self._build_regression_alerts(current_summary, baseline_summary, deltas)
+        return EvalTrendSummary(
+            current_run_id=current_run_id,
+            baseline_run_id=baseline_item.run_id if baseline_item else "",
+            compared_runs=1 + (1 if baseline_item else 0) if current_run_id else (1 if baseline_item else 0),
+            current_summary=current_summary,
+            baseline_summary=baseline_summary,
+            deltas=deltas,
+            alerts=alerts,
+        )
 
     def run(self, limit: int | None = None, persist: bool = True) -> EvalRunResult:
         started_at = utcnow()
@@ -216,3 +249,82 @@ class OfflineEvaluationService:
             average_latency_ms=round(avg_latency, 2),
             average_retrieved_chunks=round(avg_retrieved, 2),
         )
+
+    @staticmethod
+    def _summary_from_dict(payload: dict | None) -> EvalRunSummary:
+        if not payload:
+            return EvalRunSummary()
+        return EvalRunSummary.model_validate(payload)
+
+    @staticmethod
+    def _build_deltas(
+        current_summary: EvalRunSummary,
+        baseline_summary: EvalRunSummary | None,
+    ) -> dict:
+        if baseline_summary is None:
+            return {}
+        return {
+            "retrieval_hit_rate": round(current_summary.retrieval_hit_rate - baseline_summary.retrieval_hit_rate, 3),
+            "title_hit_rate": round(current_summary.title_hit_rate - baseline_summary.title_hit_rate, 3),
+            "answer_match_rate": round(current_summary.answer_match_rate - baseline_summary.answer_match_rate, 3),
+            "answer_valid_rate": round(current_summary.answer_valid_rate - baseline_summary.answer_valid_rate, 3),
+            "average_latency_ms": round(current_summary.average_latency_ms - baseline_summary.average_latency_ms, 2),
+            "average_retrieved_chunks": round(
+                current_summary.average_retrieved_chunks - baseline_summary.average_retrieved_chunks,
+                2,
+            ),
+        }
+
+    @staticmethod
+    def _build_regression_alerts(
+        current_summary: EvalRunSummary,
+        baseline_summary: EvalRunSummary | None,
+        deltas: dict,
+    ) -> list[EvalRegressionAlert]:
+        if baseline_summary is None:
+            return []
+
+        alerts: list[EvalRegressionAlert] = []
+        for metric in (
+            "retrieval_hit_rate",
+            "title_hit_rate",
+            "answer_match_rate",
+            "answer_valid_rate",
+        ):
+            delta = float(deltas.get(metric, 0.0))
+            if delta <= -0.05:
+                current_value = float(getattr(current_summary, metric))
+                baseline_value = float(getattr(baseline_summary, metric))
+                alerts.append(
+                    EvalRegressionAlert(
+                        metric=metric,
+                        severity="critical" if delta <= -0.1 else "warning",
+                        direction="down",
+                        current_value=current_value,
+                        baseline_value=baseline_value,
+                        delta=delta,
+                        message=f"{metric} regressed from {baseline_value:.3f} to {current_value:.3f}.",
+                    )
+                )
+
+        latency_delta = float(deltas.get("average_latency_ms", 0.0))
+        if (
+            latency_delta >= 100
+            and baseline_summary.average_latency_ms > 0
+            and current_summary.average_latency_ms >= baseline_summary.average_latency_ms * 1.2
+        ):
+            alerts.append(
+                EvalRegressionAlert(
+                    metric="average_latency_ms",
+                    severity="warning",
+                    direction="up",
+                    current_value=current_summary.average_latency_ms,
+                    baseline_value=baseline_summary.average_latency_ms,
+                    delta=latency_delta,
+                    message=(
+                        "average_latency_ms increased from "
+                        f"{baseline_summary.average_latency_ms:.2f} to {current_summary.average_latency_ms:.2f}."
+                    ),
+                )
+            )
+        return alerts

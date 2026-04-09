@@ -14,5 +14,7 @@
   - 查看已持久化的 offline / shadow 评测历史。
 - `GET /api/v1/admin/evaluation/runs/{run_id}`
   - 查看某一次评测运行的完整明细。
+- `GET /api/v1/admin/evaluation/trend`
+  - 基于最近的 offline run 生成趋势摘要与回归告警。
 - `GET /api/v1/metrics/evaluation`
-  - 返回基于当前评测集即时计算的评估摘要指标。
+  - 返回基于当前评测集即时计算的评估摘要指标，并附带 trend 与 alerts。

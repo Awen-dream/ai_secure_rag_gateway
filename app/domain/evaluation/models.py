@@ -90,3 +90,23 @@ class EvalRunListItem(BaseModel):
     started_at: datetime
     finished_at: datetime
     summary: dict = Field(default_factory=dict)
+
+
+class EvalRegressionAlert(BaseModel):
+    metric: str
+    severity: str = "warning"
+    direction: str
+    current_value: float
+    baseline_value: float
+    delta: float
+    message: str
+
+
+class EvalTrendSummary(BaseModel):
+    current_run_id: str = ""
+    baseline_run_id: str = ""
+    compared_runs: int = 0
+    current_summary: EvalRunSummary = Field(default_factory=EvalRunSummary)
+    baseline_summary: Optional[EvalRunSummary] = None
+    deltas: dict = Field(default_factory=dict)
+    alerts: list[EvalRegressionAlert] = Field(default_factory=list)
