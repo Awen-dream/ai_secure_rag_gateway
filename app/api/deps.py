@@ -2,6 +2,7 @@ from functools import lru_cache
 
 from app.application.conversation.memory import ConversationManager
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
+from app.application.retrieval.planning import RecallPlanningService
 from app.application.query.planning import QueryPlanningService
 from app.application.query.understanding import QueryUnderstandingService
 from app.core.config import settings
@@ -249,6 +250,13 @@ def get_query_planning_service() -> QueryPlanningService:
 
 
 @lru_cache
+def get_recall_planning_service() -> RecallPlanningService:
+    """Return the recall-planning service that maps query intent into retrieval execution plans."""
+
+    return RecallPlanningService()
+
+
+@lru_cache
 def get_retrieval_service() -> RetrievalService:
     """Return the hybrid retrieval service backed by Elasticsearch and PGVector adapters."""
 
@@ -259,6 +267,7 @@ def get_retrieval_service() -> RetrievalService:
         retrieval_cache=get_retrieval_cache(),
         reranker=get_retrieval_reranker(),
         query_planning=get_query_planning_service(),
+        recall_planning=get_recall_planning_service(),
     )
 
 

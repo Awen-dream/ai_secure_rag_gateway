@@ -98,6 +98,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_output_guard,
             get_policy_engine,
             get_query_planning_service,
+            get_recall_planning_service,
             get_query_understanding_service,
             get_prompt_service,
             get_rate_limit_service,
@@ -135,6 +136,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_openai_client,
             get_query_understanding_service,
             get_query_planning_service,
+            get_recall_planning_service,
             get_retrieval_service,
             get_chat_service,
         ):

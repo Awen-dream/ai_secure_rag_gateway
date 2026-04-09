@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.application.retrieval.planning import RecallFilterPlan, RecallPlan, RecallPlanningService
 from app.application.query.planning import QueryPlanningResult, QueryPlanningService
 from app.application.query.retrieval_cache import RetrievalCache
 from app.application.query.rewrite import QueryRewritePlan
@@ -12,12 +13,9 @@ from app.domain.retrieval.backends import BackendSearchHit, KeywordSearchBackend
 from app.domain.retrieval.models import (
     RetrievalBackendInfo,
     RetrievalExplainResponse,
-    RetrievalProfile,
     RetrievalResult,
 )
-from app.domain.retrieval.profiles import get_retrieval_profile
 from app.domain.retrieval.rerankers import HeuristicReranker, sort_by_score, weighted_fusion
-from app.domain.retrieval.retrievers import normalize_terms
 
 
 class RetrievalService:
@@ -31,6 +29,7 @@ class RetrievalService:
         retrieval_cache: RetrievalCache | None = None,
         reranker: HeuristicReranker | None = None,
         query_planning: QueryPlanningService | None = None,
+        recall_planning: RecallPlanningService | None = None,
     ) -> None:
         self.document_service = document_service
         self.keyword_backend = keyword_backend
@@ -38,6 +37,7 @@ class RetrievalService:
         self.retrieval_cache = retrieval_cache
         self.reranker = reranker
         self.query_planning = query_planning or QueryPlanningService()
+        self.recall_planning = recall_planning or RecallPlanningService()
 
     def retrieve(
         self,
@@ -69,20 +69,20 @@ class RetrievalService:
             query,
             query_plan=query_plan,
         )
+        recall_plan = self.recall_planning.plan(query_plan, top_k=top_k)
         understanding = query_plan.understanding
         rewrite_plan = query_plan.rewrite_plan
         rewritten = rewrite_plan.rewritten_query
-        profile = get_retrieval_profile(understanding.intent)
-        cache_query = self._build_cache_query(rewrite_plan)
+        profile = recall_plan.profile
         cached_results = None
         if self.retrieval_cache:
-            cached_results = self.retrieval_cache.get_results(user, cache_query, min(top_k, profile.top_k))
+            cached_results = self.retrieval_cache.get_results(user, recall_plan.cache_key, recall_plan.result_limit)
         if cached_results is not None:
             results = cached_results
         else:
-            results = self._hybrid_retrieve(user, rewrite_plan, profile)
+            results = self._hybrid_retrieve(user, recall_plan)
             if self.retrieval_cache:
-                self.retrieval_cache.set_results(user, cache_query, min(top_k, profile.top_k), results)
+                self.retrieval_cache.set_results(user, recall_plan.cache_key, recall_plan.result_limit, results)
         return RetrievalExplainResponse(
             rewritten_query=rewritten,
             intent=understanding.intent,
@@ -99,7 +99,7 @@ class RetrievalService:
             year_filters=rewrite_plan.year_filters,
             recency_hint=rewrite_plan.recency_hint,
             profile=profile,
-            results=sort_by_score(results)[: min(top_k, profile.top_k)],
+            results=sort_by_score(results)[: recall_plan.result_limit],
         )
 
     def _resolve_query_plan(
@@ -122,30 +122,29 @@ class RetrievalService:
     def _hybrid_retrieve(
         self,
         user: UserContext,
-        rewrite_plan: QueryRewritePlan,
-        profile: RetrievalProfile,
+        recall_plan: RecallPlan,
     ) -> list[RetrievalResult]:
         """Fuse Elasticsearch-style keyword hits and PGVector-style semantic hits."""
 
         access_filter = build_access_filter(user)
-        candidates = self._apply_query_filters(self.document_service.get_accessible_chunks(user), rewrite_plan)
+        rewrite_plan = recall_plan.query_plan.rewrite_plan
+        candidates = self._apply_query_filters(self.document_service.get_accessible_chunks(user), recall_plan.filters)
         if not candidates:
             return []
-        keyword_terms = list(dict.fromkeys(rewrite_plan.expanded_terms or normalize_terms(rewrite_plan.rewritten_query)))
         keyword_hits = self.keyword_backend.search(
-            query=rewrite_plan.rewritten_query,
-            terms=keyword_terms,
+            query=recall_plan.keyword_query,
+            terms=recall_plan.keyword_terms,
             candidates=candidates,
-            top_k=profile.candidate_pool,
+            top_k=recall_plan.candidate_pool,
             access_filter=access_filter,
         )
         vector_hits = self.vector_backend.search(
-            query=self._build_vector_query(rewrite_plan),
+            query=recall_plan.vector_query,
             candidates=candidates,
-            top_k=profile.candidate_pool,
+            top_k=recall_plan.candidate_pool,
             access_filter=access_filter,
         )
-        ranked_candidates = sort_by_score(self._merge_backend_hits(keyword_hits, vector_hits, profile, rewrite_plan))
+        ranked_candidates = sort_by_score(self._merge_backend_hits(keyword_hits, vector_hits, recall_plan))
         if not ranked_candidates:
             return []
 
@@ -153,21 +152,23 @@ class RetrievalService:
         filtered_candidates = [
             item
             for item in ranked_candidates
-            if item.score >= profile.min_score and item.score >= top_score * profile.relative_score_cutoff
+            if item.score >= recall_plan.profile.min_score
+            and item.score >= top_score * recall_plan.profile.relative_score_cutoff
         ]
         if self.reranker:
             filtered_candidates = self.reranker.rerank(rewrite_plan.rewritten_query, filtered_candidates)
-        return filtered_candidates[: profile.candidate_pool]
+        return filtered_candidates[: recall_plan.candidate_pool]
 
     @staticmethod
     def _merge_backend_hits(
         keyword_hits: list[BackendSearchHit],
         vector_hits: list[BackendSearchHit],
-        profile: RetrievalProfile,
-        rewrite_plan: QueryRewritePlan,
+        recall_plan: RecallPlan,
     ) -> list[RetrievalResult]:
         """Normalize backend scores and fuse them into a single candidate set."""
 
+        profile = recall_plan.profile
+        rewrite_plan = recall_plan.query_plan.rewrite_plan
         merged: dict[str, RetrievalResult] = {}
         max_keyword = max((hit.score for hit in keyword_hits), default=0.0)
         max_vector = max((hit.score for hit in vector_hits), default=0.0)
@@ -234,40 +235,22 @@ class RetrievalService:
         return normalized_results
 
     @staticmethod
-    def _build_cache_query(rewrite_plan: QueryRewritePlan) -> str:
-        return "||".join(
-            [
-                rewrite_plan.rewritten_query,
-                ",".join(rewrite_plan.tag_filters),
-                ",".join(str(item) for item in rewrite_plan.year_filters),
-                "recent" if rewrite_plan.recency_hint else "stable",
-            ]
-        )
-
-    @staticmethod
-    def _build_vector_query(rewrite_plan: QueryRewritePlan) -> str:
-        terms = [rewrite_plan.rewritten_query]
-        terms.extend(rewrite_plan.exact_phrases[:2])
-        terms.extend(rewrite_plan.keywords[:6])
-        return " ".join(dict.fromkeys(term for term in terms if term))
-
-    @staticmethod
     def _apply_query_filters(
         candidates: list[tuple],
-        rewrite_plan: QueryRewritePlan,
+        filters: RecallFilterPlan,
     ) -> list[tuple]:
         filtered = list(candidates)
-        if rewrite_plan.tag_filters:
+        if filters.tag_filters:
             filtered = [
                 item
                 for item in filtered
-                if any(tag.lower() in {doc_tag.lower() for doc_tag in item[0].tags} for tag in rewrite_plan.tag_filters)
+                if any(tag.lower() in {doc_tag.lower() for doc_tag in item[0].tags} for tag in filters.tag_filters)
             ]
-        if rewrite_plan.year_filters:
+        if filters.year_filters:
             filtered = [
                 item
                 for item in filtered
-                if item[0].updated_at.year in rewrite_plan.year_filters or item[0].created_at.year in rewrite_plan.year_filters
+                if item[0].updated_at.year in filters.year_filters or item[0].created_at.year in filters.year_filters
             ]
         return filtered
 
