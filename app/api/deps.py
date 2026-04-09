@@ -184,13 +184,6 @@ def get_prompt_template_service() -> PromptTemplateService:
 
 
 @lru_cache
-def get_prompt_service() -> PromptTemplateService:
-    """Compatibility alias for the prompt template service getter."""
-
-    return get_prompt_template_service()
-
-
-@lru_cache
 def get_prompt_builder_service() -> PromptBuilderService:
     """Return the prompt build service used to render template + context payloads."""
 

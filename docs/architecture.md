@@ -89,13 +89,11 @@
 - `*TemplateService`
   - 用于模板生命周期和模板级校验
 
-## Compatibility Shims
+## Current Canonical Paths
 
-为了降低迁移成本，下面两个旧路径暂时保留为兼容别名：
+- Chat online-QA orchestration:
+  - `app/application/chat/orchestrator.py`
+- Prompt template lifecycle and validation:
+  - `app/domain/prompts/template_service.py`
 
-- `app/domain/chat/services.py`
-  - 兼容导出 `ChatService -> ChatOrchestrator`
-- `app/domain/prompts/services.py`
-  - 兼容导出 `PromptService -> PromptTemplateService`
-
-后续新代码应优先直接依赖新的实现路径。
+新代码应直接依赖这些 canonical 路径。
