@@ -61,14 +61,11 @@ class GenerationService:
     def _generate_raw_answer(self, prompt_build: PromptBuildResult, risk_action: RiskAction) -> str:
         assembled_context = prompt_build.assembled_context
         if risk_action == RiskAction.REFUSE:
-            return (
-                "结论：当前请求触发了安全策略，平台已拒绝回答。\n"
-                "依据：问题中包含高风险指令或疑似 Prompt Injection 特征。"
-            )
+            return self._build_refusal_answer()
         if not assembled_context.results:
             if risk_action == RiskAction.CITATIONS_ONLY:
-                return "结论：根据当前已授权资料无法确认。\n依据：高敏部门在无证据命中时只返回保守结果。"
-            return "结论：根据当前已授权资料无法确认。\n依据：检索范围内没有找到足够证据。"
+                return self._build_no_evidence_answer("高敏部门在无证据命中时只返回保守结果。")
+            return self._build_no_evidence_answer("检索范围内没有找到足够证据。")
 
         if self.openai_client.can_execute():
             try:
@@ -79,11 +76,50 @@ class GenerationService:
             except Exception:
                 pass
 
-        return (
-            "结论：已基于授权知识范围给出回答。\n"
-            f"依据：问题“{prompt_build.query}”命中了 {assembled_context.retrieved_chunks} 个权限内知识片段，模板策略为 {prompt_build.template.name}。\n"
-            + "\n".join(assembled_context.fallback_evidence_lines)
-            + f"\n引用来源：{assembled_context.citation_text}"
+        return self._build_fallback_answer(prompt_build)
+
+    @staticmethod
+    def _build_refusal_answer() -> str:
+        return "\n".join(
+            [
+                "结论：当前请求触发了安全策略，平台已拒绝回答。",
+                "依据：问题中包含高风险指令或疑似 Prompt Injection 特征。",
+                "引用来源：无。",
+                "限制说明：该请求因安全策略被拦截，未进入正常知识检索与生成流程。",
+            ]
+        )
+
+    @staticmethod
+    def _build_no_evidence_answer(reason: str) -> str:
+        return "\n".join(
+            [
+                "结论：根据当前已授权资料无法确认。",
+                f"依据：{reason}",
+                "引用来源：无。",
+                "限制说明：当前授权范围内未命中可支撑回答的证据片段。",
+            ]
+        )
+
+    @staticmethod
+    def _build_fallback_answer(prompt_build: PromptBuildResult) -> str:
+        assembled_context = prompt_build.assembled_context
+        top_snippet = assembled_context.fallback_evidence_lines[0].split("] ", 1)[-1] if assembled_context.fallback_evidence_lines else "已命中相关授权证据。"
+        basis_lines = assembled_context.summary_lines[:3] or assembled_context.fallback_evidence_lines[:3]
+        basis_block = "\n".join(basis_lines)
+        citation_block = "；".join(assembled_context.citation_lines[:3]) if assembled_context.citation_lines else "无。"
+        limit_parts = [
+            f"回答基于当前命中的 {assembled_context.retrieved_chunks} 个授权片段",
+            f"{len(assembled_context.citations)} 份文档来源",
+        ]
+        if assembled_context.retrieved_chunks <= 1:
+            limit_parts.append("证据覆盖较窄")
+        return "\n".join(
+            [
+                f"结论：根据当前已授权资料，{top_snippet}",
+                f"依据：\n{basis_block}",
+                f"引用来源：{citation_block}",
+                f"限制说明：{'；'.join(limit_parts)}，建议结合原文进一步确认。",
+            ]
         )
 
     @staticmethod

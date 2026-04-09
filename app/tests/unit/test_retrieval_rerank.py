@@ -101,6 +101,43 @@ class RetrievalRerankServiceTest(unittest.TestCase):
         self.assertIn("pgvector", selected[0].retrieval_sources)
         self.assertGreater(selected[0].score, 0)
 
+    def test_rerank_limits_duplicate_chunks_from_same_document(self) -> None:
+        understanding = QueryUnderstandingResult(
+            rewritten_query="报销制度审批时限",
+            intent="exact_lookup",
+            confidence=0.9,
+            reasons=["precomputed"],
+            source="rule",
+            rule_rewritten_query="报销制度审批时限",
+            rule_intent="exact_lookup",
+            rule_confidence=0.9,
+            rule_reasons=["precomputed"],
+        )
+        recall_plan = RecallPlanningService().plan(
+            QueryPlanningResult(
+                understanding=understanding,
+                rewrite_plan=refine_query_rewrite_plan(
+                    build_query_rewrite_plan("报销制度审批时限"),
+                    understanding.rewritten_query,
+                ),
+            )
+        )
+
+        doc_one = _build_document("doc_1", "报销制度", ["finance"], 2025)
+        doc_two = _build_document("doc_2", "采购制度", ["finance"], 2025)
+        results = [
+            BackendSearchHit(document=doc_one, chunk=_build_chunk("doc_1", "chunk_1", "报销审批时限为3个工作日。"), score=8.0, backend="elasticsearch", matched_terms=["审批时限"]),
+            BackendSearchHit(document=doc_one, chunk=_build_chunk("doc_1", "chunk_2", "报销审批需要财务复核。"), score=7.5, backend="elasticsearch", matched_terms=["审批"]),
+            BackendSearchHit(document=doc_two, chunk=_build_chunk("doc_2", "chunk_3", "采购审批时限为5个工作日。"), score=7.0, backend="elasticsearch", matched_terms=["审批时限"]),
+        ]
+
+        service = RetrievalRerankService()
+        candidates = service.build_rerank_candidates(results, [], recall_plan)
+        selected = service.rerank_results(candidates, recall_plan)
+
+        self.assertEqual(selected[0].document.id, "doc_1")
+        self.assertEqual(selected[1].document.id, "doc_2")
+
 
 if __name__ == "__main__":
     unittest.main()

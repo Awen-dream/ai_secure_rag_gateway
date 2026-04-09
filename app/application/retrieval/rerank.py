@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime
 
 from app.application.retrieval.planning import RecallPlan
@@ -67,17 +68,34 @@ class RetrievalRerankService:
         for result in merged.values():
             keyword_normalized = result.keyword_score / max_keyword if max_keyword else 0.0
             vector_normalized = result.vector_score / max_vector if max_vector else 0.0
+            title_lower = result.document.title.lower()
+            section_lower = result.chunk.section_name.lower()
+            body_lower = result.chunk.text.lower()
             title_boost = (
                 profile.title_boost
-                if any(term in result.document.title.lower() for term in rewrite_plan.expanded_terms or rewrite_plan.keywords)
+                if any(term in title_lower for term in rewrite_plan.expanded_terms or rewrite_plan.keywords)
                 else 0.0
             )
             phrase_boost = sum(
-                0.04 for phrase in rewrite_plan.exact_phrases[:2] if phrase.lower() in result.chunk.text.lower()
+                0.04 for phrase in rewrite_plan.exact_phrases[:2] if phrase.lower() in body_lower
             )
             tag_boost = (
                 0.05
-                if rewrite_plan.tag_filters and any(tag.lower() in result.document.tags for tag in rewrite_plan.tag_filters)
+                if rewrite_plan.tag_filters
+                and any(tag.lower() in {item.lower() for item in result.document.tags} for tag in rewrite_plan.tag_filters)
+                else 0.0
+            )
+            exact_match_boost = min(
+                sum(0.03 for term in recall_plan.exact_match_terms if term in f"{title_lower} {section_lower} {body_lower}"),
+                0.12,
+            )
+            year_boost = (
+                0.04
+                if recall_plan.filters.year_filters
+                and (
+                    result.document.updated_at.year in recall_plan.filters.year_filters
+                    or result.document.created_at.year in recall_plan.filters.year_filters
+                )
                 else 0.0
             )
             recency_boost = self._recency_boost(result.document.updated_at, rewrite_plan.recency_hint)
@@ -93,7 +111,10 @@ class RetrievalRerankService:
                 vector_weight=profile.vector_weight,
                 title_boost=title_boost,
             )
-            result.score = round(result.score + phrase_boost + tag_boost + recency_boost + rank_fusion, 4)
+            result.score = round(
+                result.score + phrase_boost + tag_boost + exact_match_boost + year_boost + recency_boost + rank_fusion,
+                4,
+            )
             result.keyword_score = round(keyword_normalized, 4)
             result.vector_score = round(vector_normalized, 4)
             normalized_results.append(result)
@@ -113,7 +134,23 @@ class RetrievalRerankService:
         ]
         if self.reranker:
             filtered_candidates = self.reranker.rerank(rewrite_plan.rewritten_query, filtered_candidates)
-        return filtered_candidates[: recall_plan.candidate_pool]
+        return self._apply_document_diversity(filtered_candidates, recall_plan.max_chunks_per_document)[: recall_plan.candidate_pool]
+
+    @staticmethod
+    def _apply_document_diversity(results: list[RetrievalResult], max_chunks_per_document: int) -> list[RetrievalResult]:
+        if max_chunks_per_document <= 0:
+            return results
+
+        kept: list[RetrievalResult] = []
+        overflow: list[RetrievalResult] = []
+        doc_counts: dict[str, int] = defaultdict(int)
+        for result in results:
+            if doc_counts[result.document.id] < max_chunks_per_document:
+                kept.append(result)
+                doc_counts[result.document.id] += 1
+            else:
+                overflow.append(result)
+        return kept + overflow
 
     @staticmethod
     def _reciprocal_rank_fusion(

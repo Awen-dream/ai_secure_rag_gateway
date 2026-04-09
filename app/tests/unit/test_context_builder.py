@@ -75,8 +75,38 @@ class ContextBuilderServiceTest(unittest.TestCase):
         self.assertEqual(len(assembled.citations), 1)
         self.assertEqual(len(assembled.evidence_blocks), 2)
         self.assertEqual(len(assembled.fallback_evidence_lines), 2)
+        self.assertEqual(len(assembled.summary_lines), 2)
         self.assertIn("[1] 报销制度", assembled.citation_text)
         self.assertIn("文档：报销制度 v2", assembled.evidence_blocks[0])
+
+    def test_build_compacts_duplicate_chunks(self) -> None:
+        document = _build_document("doc_1", "报销制度")
+        duplicate_text = "报销审批时限为3个工作日。\n请提供审批单据。"
+        results = [
+            RetrievalResult(
+                document=document,
+                chunk=_build_chunk("doc_1", "chunk_1", duplicate_text),
+                score=0.91,
+                keyword_score=0.8,
+                vector_score=0.7,
+                matched_terms=["报销", "审批时限"],
+                retrieval_sources=["elasticsearch"],
+            ),
+            RetrievalResult(
+                document=document,
+                chunk=_build_chunk("doc_1", "chunk_2", duplicate_text.replace("\n", " ")),
+                score=0.90,
+                keyword_score=0.79,
+                vector_score=0.69,
+                matched_terms=["报销", "审批时限"],
+                retrieval_sources=["pgvector"],
+            ),
+        ]
+
+        assembled = ContextBuilderService().build(results)
+
+        self.assertEqual(assembled.retrieved_chunks, 1)
+        self.assertEqual(len(assembled.evidence_blocks), 1)
 
 
 if __name__ == "__main__":

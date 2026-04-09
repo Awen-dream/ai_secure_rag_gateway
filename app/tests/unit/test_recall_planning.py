@@ -35,12 +35,42 @@ class RecallPlanningServiceTest(unittest.TestCase):
         self.assertEqual(plan.profile.name, "standard_qa")
         self.assertEqual(plan.keyword_query, "报销制度审批时限")
         self.assertIn("审批时限", plan.keyword_terms)
+        self.assertIn("报销制度审批时限", plan.exact_match_terms)
         self.assertEqual(plan.filters.tag_filters, ["finance"])
         self.assertEqual(plan.filters.year_filters, [2025])
         self.assertIn("报销制度审批时限", plan.vector_query)
         self.assertEqual(plan.result_limit, 5)
-        self.assertEqual(plan.candidate_pool, plan.profile.candidate_pool)
+        self.assertGreater(plan.candidate_pool, plan.profile.candidate_pool)
+        self.assertEqual(plan.max_chunks_per_document, 2)
         self.assertIn("finance", plan.cache_key)
+
+    def test_short_exact_query_upgrades_to_exact_lookup_profile(self) -> None:
+        understanding = QueryUnderstandingResult(
+            rewritten_query="报销制度",
+            intent="standard_qa",
+            confidence=0.8,
+            reasons=["precomputed"],
+            source="rule",
+            rule_rewritten_query="报销制度",
+            rule_intent="standard_qa",
+            rule_confidence=0.8,
+            rule_reasons=["precomputed"],
+        )
+        rewrite_plan = refine_query_rewrite_plan(
+            build_query_rewrite_plan("“报销制度”"),
+            understanding.rewritten_query,
+        )
+
+        plan = RecallPlanningService().plan(
+            QueryPlanningResult(
+                understanding=understanding,
+                rewrite_plan=rewrite_plan,
+            ),
+            top_k=3,
+        )
+
+        self.assertEqual(plan.profile.name, "exact_lookup")
+        self.assertEqual(plan.max_chunks_per_document, 1)
 
 
 if __name__ == "__main__":
