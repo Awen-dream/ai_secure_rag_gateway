@@ -49,8 +49,22 @@ jobs:
         run: |
           bash scripts/run_pg_es_integration.sh
 
-  release-gate-smoke:
+  release-gate:
     runs-on: ubuntu-latest
+    needs:
+      - unit-tests
+      - integration-tests
+    env:
+      APP_REPOSITORY_BACKEND: sqlite
+      APP_SQLITE_PATH: .data/ci/release-gate.db
+      APP_REDIS_MODE: local-fallback
+      APP_ELASTICSEARCH_MODE: local-fallback
+      APP_PGVECTOR_MODE: local-fallback
+      APP_EVAL_DATASET_PATH: .data/ci/evaluation/dataset.jsonl
+      APP_EVAL_RUNS_DIR: .data/ci/evaluation/runs
+      APP_EVAL_BASELINE_PATH: .data/ci/evaluation/baseline.json
+      APP_DOCUMENT_STAGING_DIR: .data/ci/staging/documents
+      OPENAI_API_KEY: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,6 +79,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run release gate smoke
+      - name: Prepare release gate fixture
         run: |
-          python scripts/run_release_gate.py --json || true
+          python scripts/prepare_release_gate_fixture.py --reset --run-shadow
+
+      - name: Run blocking release gate
+        run: |
+          mkdir -p .data/ci/reports
+          python scripts/run_release_gate.py --json > .data/ci/reports/release-gate-report.json
+
+      - name: Upload release gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-report
+          path: .data/ci/reports/release-gate-report.json

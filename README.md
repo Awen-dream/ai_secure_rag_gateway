@@ -174,6 +174,7 @@ make run-ingestion-worker
 - 质量基线持久化
 - 基线驱动的 quality gate
 - release readiness gate
+- 本地/CI 统一的 release gate fixture 预置与阻断式发布门禁
 
 ## Embedding 与 Rerank
 
@@ -347,6 +348,8 @@ scripts/
 - 质量基线持久化与基线驱动 quality gate
 - trend summary / regression alerts
 - release readiness report 与显式 release gate checklist
+- `scripts/prepare_release_gate_fixture.py` 可生成最小文档、评测样本、offline run 与 shadow run
+- `make prepare-release-gate` / `make release-gate` 可在本地复现 CI 的发布门禁流程
 - 结构化审计检索与后台看板汇总
 
 本地启动 ingestion worker：

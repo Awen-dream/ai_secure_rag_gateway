@@ -25,6 +25,7 @@ UNIT_TESTS = \
 	app.tests.unit.test_chat_output_guard_integration \
 	app.tests.unit.test_output_guard \
 	app.tests.unit.test_retrieval_backends \
+	app.tests.unit.test_release_gate_scripts \
 	app.tests.unit.test_admin_console_endpoints \
 	app.tests.unit.test_admin_retrieval_endpoints
 
@@ -33,7 +34,7 @@ INTEGRATION_TESTS = \
 	app.tests.integration.test_postgres_metadata_repository_integration \
 	app.tests.integration.test_redis_integration
 
-.PHONY: install run run-ingestion-worker run-feishu-sync-scheduler release-gate test-unit test-integration test-all integration-up integration-down compile
+.PHONY: install run run-ingestion-worker run-feishu-sync-scheduler prepare-release-gate release-gate test-unit test-integration test-all integration-up integration-down compile
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -47,7 +48,11 @@ run-ingestion-worker:
 run-feishu-sync-scheduler:
 	PYTHONPATH=. $(PYTHON) scripts/run_feishu_sync_scheduler.py
 
+prepare-release-gate:
+	PYTHONPATH=. $(PYTHON) scripts/prepare_release_gate_fixture.py --reset --run-shadow
+
 release-gate:
+	PYTHONPATH=. $(PYTHON) scripts/prepare_release_gate_fixture.py --reset --run-shadow
 	PYTHONPATH=. $(PYTHON) scripts/run_release_gate.py --json
 
 compile:
