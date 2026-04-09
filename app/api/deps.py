@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from app.application.context.builder import ContextBuilderService
 from app.application.conversation.memory import ConversationManager
 from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
@@ -195,6 +196,13 @@ def get_output_guard() -> OutputGuard:
 
 
 @lru_cache
+def get_context_builder_service() -> ContextBuilderService:
+    """Return the context assembly service used by chat and prompt preview flows."""
+
+    return ContextBuilderService()
+
+
+@lru_cache
 def get_audit_service() -> AuditService:
     """Return the audit service used for metrics and trace logging."""
 
@@ -292,6 +300,7 @@ def get_chat_service() -> ChatService:
         output_guard=get_output_guard(),
         audit_service=get_audit_service(),
         openai_client=get_openai_client(),
+        context_builder=get_context_builder_service(),
         session_cache=get_session_cache(),
         conversation_manager=ConversationManager(
             get_repository(),

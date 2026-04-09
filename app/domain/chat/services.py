@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from app.application.context.builder import ContextBuilderService
 from app.application.conversation.memory import ConversationManager, build_permission_signature
 from app.application.conversation.summarizer import summarize_long_history, summarize_recent_messages
 from app.application.conversation.session_cache import SessionCache
@@ -11,7 +12,6 @@ from app.domain.audit.services import AuditService
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession, SessionStatus
 from app.domain.chat.schemas import ChatQueryRequest, ChatQueryResponse
-from app.domain.citations.services import build_citations
 from app.domain.prompts.services import PromptService
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
@@ -35,6 +35,7 @@ class ChatService:
         output_guard: OutputGuard,
         audit_service: AuditService,
         openai_client: OpenAIClient,
+        context_builder: ContextBuilderService | None = None,
         session_cache: SessionCache | None = None,
         conversation_manager: ConversationManager | None = None,
     ) -> None:
@@ -45,6 +46,7 @@ class ChatService:
         self.output_guard = output_guard
         self.audit_service = audit_service
         self.openai_client = openai_client
+        self.context_builder = context_builder or ContextBuilderService()
         self.session_cache = session_cache
         self.conversation_manager = conversation_manager or ConversationManager(repository)
 
@@ -67,12 +69,12 @@ class ChatService:
         )
         risk_action, risk_level = self.policy_engine.evaluate(user, conversation_context.rewritten_query, len(retrieved))
         input_risk_action = risk_action
-        citations = build_citations(retrieved)
+        assembled_context = self.context_builder.build(retrieved)
+        citations = assembled_context.citations
         raw_answer = self._build_answer(
             query=conversation_context.rewritten_query,
             template=template,
-            retrieved=retrieved,
-            citations=citations,
+            assembled_context=assembled_context,
             risk_action=risk_action,
             session_summary=conversation_context.session_summary,
         )
@@ -198,7 +200,7 @@ class ChatService:
             )
         )
 
-    def _build_answer(self, query: str, template, retrieved, citations, risk_action: RiskAction, session_summary: str) -> str:
+    def _build_answer(self, query: str, template, assembled_context, risk_action: RiskAction, session_summary: str) -> str:
         """Generate one answer with OpenAI when configured, otherwise fall back to deterministic text."""
 
         if risk_action == RiskAction.REFUSE:
@@ -206,7 +208,7 @@ class ChatService:
                 "结论：当前请求触发了安全策略，平台已拒绝回答。\n"
                 "依据：问题中包含高风险指令或疑似 Prompt Injection 特征。"
             )
-        if not retrieved:
+        if not assembled_context.results:
             if risk_action == RiskAction.CITATIONS_ONLY:
                 return "结论：根据当前已授权资料无法确认。\n依据：高敏部门在无证据命中时只返回保守结果。"
             return "结论：根据当前已授权资料无法确认。\n依据：检索范围内没有找到足够证据。"
@@ -215,8 +217,7 @@ class ChatService:
             rendered_prompt = self.prompt_service.render_chat_prompt(
                 template=template,
                 query=query,
-                retrieved=retrieved,
-                citations=citations,
+                assembled_context=assembled_context,
                 session_summary=session_summary,
             )
             try:
@@ -227,15 +228,9 @@ class ChatService:
             except Exception:
                 pass
 
-        citation_by_doc_id = {item.doc_id: item.index for item in citations}
-        evidence_lines = [
-            f"[{citation_by_doc_id.get(result.document.id, index)}] {result.chunk.text.replace(chr(10), ' ')[:180]}"
-            for index, result in enumerate(retrieved, start=1)
-        ]
-        citation_text = ", ".join(f"[{item.index}] {item.title}" for item in citations)
         return (
             "结论：已基于授权知识范围给出回答。\n"
-            f"依据：问题“{query}”命中了 {len(retrieved)} 个权限内知识片段，模板策略为 {template.name}。\n"
-            + "\n".join(evidence_lines)
-            + f"\n引用来源：{citation_text}"
+            f"依据：问题“{query}”命中了 {assembled_context.retrieved_chunks} 个权限内知识片段，模板策略为 {template.name}。\n"
+            + "\n".join(assembled_context.fallback_evidence_lines)
+            + f"\n引用来源：{assembled_context.citation_text}"
         )

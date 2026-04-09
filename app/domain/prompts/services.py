@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from app.domain.citations.services import Citation
+from app.application.context.builder import AssembledContext
 from app.domain.prompts.models import (
     PromptPreviewResponse,
     PromptTemplate,
     PromptValidationResult,
     RenderedPrompt,
 )
-from app.domain.retrieval.models import RetrievalResult
 from app.infrastructure.db.repositories.base import MetadataRepository
 
 
@@ -75,37 +74,14 @@ class PromptService:
         self,
         template: PromptTemplate,
         query: str,
-        retrieved: list[RetrievalResult],
-        citations: list[Citation],
+        assembled_context: AssembledContext,
         session_summary: str = "",
     ) -> RenderedPrompt:
         """Render one authorized chat prompt from template, evidence chunks and citations."""
 
-        citation_by_doc_id = {item.doc_id: item for item in citations}
-        evidence_blocks: list[str] = []
-        for index, result in enumerate(retrieved, start=1):
-            citation = citation_by_doc_id.get(result.document.id)
-            citation_label = citation.index if citation else index
-            sources = ", ".join(result.retrieval_sources) or "retrieval"
-            evidence_blocks.append(
-                "\n".join(
-                    [
-                        f"[引用{citation_label}] 文档：{result.document.title} v{result.document.version}",
-                        f"章节：{result.chunk.section_name}",
-                        f"来源：{sources}",
-                        f"相关度：{result.score:.4f}",
-                        f"内容：{result.chunk.text.strip()}",
-                    ]
-                )
-            )
-
-        citation_lines = [
-            f"[{item.index}] {item.title} / {item.section_name} / v{item.version}"
-            for item in citations
-        ]
         summary_block = session_summary.strip() or "无"
-        evidence_block = "\n\n".join(evidence_blocks) if evidence_blocks else "无命中证据。"
-        citation_block = "\n".join(citation_lines) if citation_lines else "无"
+        evidence_block = "\n\n".join(assembled_context.evidence_blocks) if assembled_context.evidence_blocks else "无命中证据。"
+        citation_block = "\n".join(assembled_context.citation_lines) if assembled_context.citation_lines else "无"
 
         instructions = "\n".join(
             [
@@ -130,21 +106,20 @@ class PromptService:
         self,
         scene: str,
         query: str,
-        retrieved: list[RetrievalResult],
-        citations: list[Citation],
+        assembled_context: AssembledContext,
         session_summary: str = "",
     ) -> PromptPreviewResponse:
         """Render a preview payload for prompt debugging in admin workflows."""
 
         template = self.get_template(scene)
-        rendered = self.render_chat_prompt(template, query, retrieved, citations, session_summary=session_summary)
+        rendered = self.render_chat_prompt(template, query, assembled_context, session_summary=session_summary)
         return PromptPreviewResponse(
             scene=scene,
             template_id=template.id,
             template_version=template.version,
             instructions=rendered.instructions,
             input_text=rendered.input_text,
-            retrieved_chunks=len(retrieved),
+            retrieved_chunks=assembled_context.retrieved_chunks,
         )
 
     def validate_output(self, scene: str, answer: str) -> PromptValidationResult:

@@ -43,6 +43,7 @@ class DocsFileUploadTest(unittest.TestCase):
         from app.api.deps import (
             get_audit_service,
             get_chat_service,
+            get_context_builder_service,
             get_document_ingestion_worker,
             get_document_service,
             get_document_ingestion_orchestrator,
@@ -92,6 +93,7 @@ class DocsFileUploadTest(unittest.TestCase):
             get_prompt_service,
             get_policy_engine,
             get_output_guard,
+            get_context_builder_service,
             get_audit_service,
             get_openai_client,
             get_query_understanding_service,

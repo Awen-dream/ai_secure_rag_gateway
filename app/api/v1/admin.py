@@ -4,8 +4,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.application.context.builder import ContextBuilderService
 from app.api.deps import (
     get_audit_service,
+    get_context_builder_service,
     get_document_task_queue,
     get_feishu_source_sync_service,
     get_keyword_backend,
@@ -19,7 +21,6 @@ from app.domain.auth.filter_builder import build_access_filter
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
-from app.domain.citations.services import build_citations
 from app.domain.prompts.models import (
     PromptPreviewRequest,
     PromptPreviewResponse,
@@ -97,16 +98,16 @@ def preview_prompt_template(
     user: UserContext = Depends(require_admin),
     prompt_service: PromptService = Depends(get_prompt_service),
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
+    context_builder: ContextBuilderService = Depends(get_context_builder_service),
 ) -> PromptPreviewResponse:
     """Render the active prompt with live retrieval evidence for admin preview."""
 
     retrieved = retrieval_service.retrieve(user, payload.query, top_k=payload.top_k)
-    citations = build_citations(retrieved)
+    assembled_context = context_builder.build(retrieved)
     return prompt_service.preview_chat_prompt(
         scene=payload.scene,
         query=payload.query,
-        retrieved=retrieved,
-        citations=citations,
+        assembled_context=assembled_context,
         session_summary=payload.session_summary,
     )
 
