@@ -65,14 +65,19 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
     def setUp(self) -> None:
         self.db_path = "/tmp/secure_rag_gateway_admin_retrieval.db"
         self.eval_path = "/tmp/secure_rag_gateway_admin_eval.jsonl"
+        self.eval_runs_dir = Path("/tmp/secure_rag_gateway_admin_eval_runs")
         Path(self.db_path).unlink(missing_ok=True)
         Path(self.eval_path).unlink(missing_ok=True)
+        if self.eval_runs_dir.exists():
+            for path in self.eval_runs_dir.glob("*.json"):
+                path.unlink()
 
         import os
 
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["APP_EVAL_DATASET_PATH"] = self.eval_path
+        os.environ["APP_EVAL_RUNS_DIR"] = str(self.eval_runs_dir)
         os.environ["APP_REDIS_MODE"] = "local-fallback"
         os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
         os.environ["OPENAI_API_KEY"] = ""
@@ -82,6 +87,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
         settings.eval_dataset_path = self.eval_path
+        settings.eval_runs_dir = str(self.eval_runs_dir)
         settings.redis_mode = "local-fallback"
         settings.rate_limit_max_requests = 30
         settings.openai_api_key = None
@@ -97,6 +103,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_document_source_store,
             get_document_task_queue,
             get_eval_dataset_store,
+            get_eval_run_store,
             get_embedding_client,
             get_feishu_client,
             get_feishu_source_sync_service,
@@ -142,6 +149,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_document_ingestion_worker,
             get_document_service,
             get_eval_dataset_store,
+            get_eval_run_store,
             get_retrieval_reranker,
             get_prompt_template_service,
             get_policy_engine,
@@ -165,6 +173,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
 
         self.client = TestClient(app)
         self.get_eval_dataset_store = get_eval_dataset_store
+        self.get_eval_run_store = get_eval_run_store
         self.get_feishu_source_sync_service = get_feishu_source_sync_service
         self.headers = {
             "X-User-Id": "u1",
@@ -639,6 +648,59 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.assertEqual(payload["dataset_size"], 1)
         self.assertEqual(payload["summary"]["total_cases"], 1)
         self.assertEqual(payload["summary"]["title_hit_rate"], 1.0)
+        self.assertTrue(payload["run_id"].startswith("eval_"))
+
+        runs = self.client.get("/api/v1/admin/evaluation/runs", headers=self.headers)
+        self.assertEqual(runs.status_code, 200)
+        runs_payload = runs.json()
+        self.assertEqual(len(runs_payload), 1)
+        self.assertEqual(runs_payload[0]["run_id"], payload["run_id"])
+
+        run_detail = self.client.get(f"/api/v1/admin/evaluation/runs/{payload['run_id']}", headers=self.headers)
+        self.assertEqual(run_detail.status_code, 200)
+        detail_payload = run_detail.json()
+        self.assertEqual(detail_payload["run_id"], payload["run_id"])
+        self.assertEqual(detail_payload["mode"], "offline")
+
+    def test_admin_can_run_shadow_evaluation(self) -> None:
+        from app.domain.evaluation.models import EvalSample
+
+        self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "报销制度",
+                "content": "报销制度说明。\n\n审批时限为3个工作日。",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        self.get_eval_dataset_store().replace_samples(
+            [
+                EvalSample(
+                    id="case_1",
+                    tenant_id="t1",
+                    department_id="engineering",
+                    role="admin",
+                    clearance_level=3,
+                    query="报销审批时限是什么？",
+                    expected_titles=["报销制度"],
+                )
+            ]
+        )
+
+        response = self.client.post("/api/v1/admin/evaluation/run-shadow", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["mode"], "shadow")
+        self.assertEqual(payload["dataset_size"], 1)
+        self.assertEqual(len(payload["diffs"]), 1)
+        self.assertIn("primary_summary", payload)
+        self.assertIn("shadow_summary", payload)
+
+        runs = self.client.get("/api/v1/admin/evaluation/runs", headers=self.headers)
+        self.assertEqual(runs.status_code, 200)
+        self.assertEqual(runs.json()[0]["run_id"], payload["run_id"])
 
     def test_admin_can_view_evaluation_metrics(self) -> None:
         from app.domain.evaluation.models import EvalSample

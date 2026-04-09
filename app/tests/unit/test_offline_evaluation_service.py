@@ -8,6 +8,7 @@ from app.domain.evaluation.models import EvalSample
 from app.domain.prompts.models import PromptTemplate, PromptValidationResult, RenderedPrompt
 from app.domain.risk.models import RiskAction
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
+from app.infrastructure.storage.local_eval_run_store import LocalEvalRunStore
 
 
 class _RetrievalServiceStub:
@@ -125,10 +126,15 @@ class _GenerationServiceStub:
 class OfflineEvaluationServiceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dataset_path = Path("/tmp/secure_rag_gateway_eval_dataset.jsonl")
+        self.runs_dir = Path("/tmp/secure_rag_gateway_eval_runs")
         self.dataset_path.unlink(missing_ok=True)
+        if self.runs_dir.exists():
+            for path in self.runs_dir.glob("*.json"):
+                path.unlink()
 
-    def test_run_returns_summary_and_case_results(self) -> None:
+    def _build_service(self) -> OfflineEvaluationService:
         store = LocalEvalDatasetStore(str(self.dataset_path))
+        run_store = LocalEvalRunStore(str(self.runs_dir))
         store.replace_samples(
             [
                 EvalSample(
@@ -140,14 +146,17 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
                 )
             ]
         )
-        service = OfflineEvaluationService(
+        return OfflineEvaluationService(
             dataset_store=store,
+            run_store=run_store,
             retrieval_service=_RetrievalServiceStub(),
             context_builder=_ContextBuilderStub(),
             prompt_builder=_PromptBuilderStub(),
             generation_service=_GenerationServiceStub(),
         )
 
+    def test_run_returns_summary_and_case_results(self) -> None:
+        service = self._build_service()
         result = service.run()
 
         self.assertEqual(result.dataset_size, 1)
@@ -156,6 +165,36 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertEqual(result.summary.answer_match_rate, 1.0)
         self.assertEqual(result.summary.answer_valid_rate, 1.0)
         self.assertEqual(result.cases[0].matched_doc_ids, ["doc_finance"])
+
+    def test_run_persists_and_can_be_listed(self) -> None:
+        service = self._build_service()
+
+        run = service.run()
+        listed = service.list_runs(limit=10)
+        loaded = service.get_run(run.run_id)
+
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0].run_id, run.run_id)
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded["mode"], "offline")
+        self.assertEqual(loaded["summary"]["total_cases"], 1)
+
+    def test_run_shadow_returns_comparison_and_persists(self) -> None:
+        service = self._build_service()
+
+        run = service.run_shadow()
+        loaded = service.get_run(run.run_id)
+
+        self.assertEqual(run.mode, "shadow")
+        self.assertEqual(run.dataset_size, 1)
+        self.assertEqual(len(run.diffs), 1)
+        self.assertEqual(run.diffs[0].sample_id, "case_1")
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded["mode"], "shadow")
+        self.assertIn("primary_summary", loaded)
+        self.assertIn("shadow_summary", loaded)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue, DocumentIngestionWorker
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
+from app.infrastructure.storage.local_eval_run_store import LocalEvalRunStore
 from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
@@ -143,6 +144,13 @@ def get_eval_dataset_store() -> LocalEvalDatasetStore:
 
 
 @lru_cache
+def get_eval_run_store() -> LocalEvalRunStore:
+    """Return the local evaluation run store used by offline/shadow evaluation history."""
+
+    return LocalEvalRunStore(settings.eval_runs_dir)
+
+
+@lru_cache
 def get_document_ingestion_orchestrator() -> DocumentIngestionOrchestrator:
     """Return the document ingestion orchestrator used by synchronous and background upload flows."""
 
@@ -238,6 +246,7 @@ def get_offline_evaluation_service() -> OfflineEvaluationService:
 
     return OfflineEvaluationService(
         dataset_store=get_eval_dataset_store(),
+        run_store=get_eval_run_store(),
         retrieval_service=get_retrieval_service(),
         context_builder=get_context_builder_service(),
         prompt_builder=get_prompt_builder_service(),

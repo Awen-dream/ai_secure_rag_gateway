@@ -17,6 +17,7 @@ class AppSettings(BaseModel):
     session_cache_ttl_seconds: int = int(os.getenv("APP_SESSION_CACHE_TTL_SECONDS", "3600"))
     retrieval_cache_ttl_seconds: int = int(os.getenv("APP_RETRIEVAL_CACHE_TTL_SECONDS", "300"))
     eval_dataset_path: str = os.getenv("APP_EVAL_DATASET_PATH", ".data/evaluation/dataset.jsonl")
+    eval_runs_dir: str = os.getenv("APP_EVAL_RUNS_DIR", ".data/evaluation/runs")
     rate_limit_window_seconds: int = int(os.getenv("APP_RATE_LIMIT_WINDOW_SECONDS", "60"))
     rate_limit_max_requests: int = int(os.getenv("APP_RATE_LIMIT_MAX_REQUESTS", "30"))
     document_ingestion_queue_name: str = os.getenv("APP_DOCUMENT_INGESTION_QUEUE_NAME", "queue:document_ingestion")

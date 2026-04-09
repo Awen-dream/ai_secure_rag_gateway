@@ -51,8 +51,42 @@ class EvalRunSummary(BaseModel):
 
 
 class EvalRunResult(BaseModel):
+    run_id: str = ""
+    mode: str = "offline"
     dataset_size: int
     started_at: datetime
     finished_at: datetime
     summary: EvalRunSummary
     cases: list[EvalCaseResult] = Field(default_factory=list)
+
+
+class ShadowEvalCaseDiff(BaseModel):
+    sample_id: str
+    query: str
+    primary_hit: bool = False
+    shadow_hit: bool = False
+    primary_answer_match: bool = False
+    shadow_answer_match: bool = False
+    changed: bool = False
+    primary_rewritten_query: str = ""
+    shadow_rewritten_query: str = ""
+
+
+class ShadowEvalRunResult(BaseModel):
+    run_id: str = ""
+    mode: str = "shadow"
+    dataset_size: int
+    started_at: datetime
+    finished_at: datetime
+    primary_summary: EvalRunSummary
+    shadow_summary: EvalRunSummary
+    diffs: list[ShadowEvalCaseDiff] = Field(default_factory=list)
+
+
+class EvalRunListItem(BaseModel):
+    run_id: str
+    mode: str
+    dataset_size: int
+    started_at: datetime
+    finished_at: datetime
+    summary: dict = Field(default_factory=dict)

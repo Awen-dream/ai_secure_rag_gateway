@@ -30,7 +30,7 @@ from app.api.deps import (
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
-from app.domain.evaluation.models import EvalRunResult, EvalSample
+from app.domain.evaluation.models import EvalRunListItem, EvalRunResult, EvalSample, ShadowEvalRunResult
 from app.domain.prompts.models import (
     PromptPreviewRequest,
     PromptPreviewResponse,
@@ -88,6 +88,42 @@ def run_offline_evaluation(
     """Run offline evaluation against the current retrieval and generation stack."""
 
     return service.run(limit=limit)
+
+
+@router.post("/evaluation/run-shadow", response_model=ShadowEvalRunResult)
+def run_shadow_evaluation(
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> ShadowEvalRunResult:
+    """Run a shadow evaluation that compares the active retrieval stack against a heuristic baseline."""
+
+    return service.run_shadow(limit=limit)
+
+
+@router.get("/evaluation/runs", response_model=list[EvalRunListItem])
+def list_evaluation_runs(
+    limit: int = Query(20, ge=1, le=200),
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> list[EvalRunListItem]:
+    """List persisted offline and shadow evaluation runs for later inspection."""
+
+    return service.list_runs(limit=limit)
+
+
+@router.get("/evaluation/runs/{run_id}")
+def get_evaluation_run(
+    run_id: str,
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> dict:
+    """Return one persisted evaluation run payload by id."""
+
+    payload = service.get_run(run_id)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation run not found.")
+    return payload
 
 
 @router.get("/prompts", response_model=list[PromptTemplate])

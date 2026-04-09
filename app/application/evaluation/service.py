@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from app.application.context.builder import ContextBuilderService
 from app.application.generation.service import GenerationService
 from app.application.prompting.builder import PromptBuilderService
 from app.domain.auth.models import UserContext
-from app.domain.evaluation.models import EvalCaseResult, EvalRunResult, EvalRunSummary, EvalSample
+from app.domain.evaluation.models import (
+    EvalCaseResult,
+    EvalRunListItem,
+    EvalRunResult,
+    EvalRunSummary,
+    EvalSample,
+    ShadowEvalCaseDiff,
+    ShadowEvalRunResult,
+)
+from app.domain.retrieval.rerankers import HeuristicReranker
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
+from app.infrastructure.storage.local_eval_run_store import LocalEvalRunStore
 
 
 def utcnow() -> datetime:
@@ -22,12 +33,14 @@ class OfflineEvaluationService:
     def __init__(
         self,
         dataset_store: LocalEvalDatasetStore,
+        run_store: LocalEvalRunStore,
         retrieval_service: RetrievalService,
         context_builder: ContextBuilderService,
         prompt_builder: PromptBuilderService,
         generation_service: GenerationService,
     ) -> None:
         self.dataset_store = dataset_store
+        self.run_store = run_store
         self.retrieval_service = retrieval_service
         self.context_builder = context_builder
         self.prompt_builder = prompt_builder
@@ -36,7 +49,13 @@ class OfflineEvaluationService:
     def list_samples(self) -> list[EvalSample]:
         return self.dataset_store.list_samples()
 
-    def run(self, limit: int | None = None) -> EvalRunResult:
+    def list_runs(self, limit: int = 20) -> list[EvalRunListItem]:
+        return self.run_store.list_runs(limit=limit)
+
+    def get_run(self, run_id: str) -> dict | None:
+        return self.run_store.load_run(run_id)
+
+    def run(self, limit: int | None = None, persist: bool = True) -> EvalRunResult:
         started_at = utcnow()
         samples = self.dataset_store.list_samples()
         if limit is not None:
@@ -44,15 +63,63 @@ class OfflineEvaluationService:
 
         case_results = [self._run_case(sample) for sample in samples]
         finished_at = utcnow()
-        return EvalRunResult(
+        run = EvalRunResult(
+            run_id=f"eval_{uuid.uuid4().hex[:12]}",
+            mode="offline",
             dataset_size=len(samples),
             started_at=started_at,
             finished_at=finished_at,
             summary=self._summarize(case_results),
             cases=case_results,
         )
+        if persist:
+            self.run_store.save_run(run.run_id, run.model_dump(mode="json"))
+        return run
 
-    def _run_case(self, sample: EvalSample) -> EvalCaseResult:
+    def run_shadow(self, limit: int | None = None, persist: bool = True) -> ShadowEvalRunResult:
+        started_at = utcnow()
+        samples = self.dataset_store.list_samples()
+        if limit is not None:
+            samples = samples[:limit]
+
+        primary_cases = [self._run_case(sample, retrieval_service=self.retrieval_service) for sample in samples]
+        shadow_service = self._build_shadow_retrieval_service()
+        shadow_cases = [self._run_case(sample, retrieval_service=shadow_service) for sample in samples]
+        diffs = [
+            ShadowEvalCaseDiff(
+                sample_id=sample.id,
+                query=sample.query,
+                primary_hit=primary.hit_expected_doc or primary.hit_expected_title,
+                shadow_hit=shadow.hit_expected_doc or shadow.hit_expected_title,
+                primary_answer_match=primary.answer_contains_expected,
+                shadow_answer_match=shadow.answer_contains_expected,
+                changed=(
+                    (primary.hit_expected_doc != shadow.hit_expected_doc)
+                    or (primary.hit_expected_title != shadow.hit_expected_title)
+                    or (primary.answer_contains_expected != shadow.answer_contains_expected)
+                    or (primary.rewritten_query != shadow.rewritten_query)
+                ),
+                primary_rewritten_query=primary.rewritten_query,
+                shadow_rewritten_query=shadow.rewritten_query,
+            )
+            for sample, primary, shadow in zip(samples, primary_cases, shadow_cases)
+        ]
+        finished_at = utcnow()
+        run = ShadowEvalRunResult(
+            run_id=f"shadow_{uuid.uuid4().hex[:12]}",
+            mode="shadow",
+            dataset_size=len(samples),
+            started_at=started_at,
+            finished_at=finished_at,
+            primary_summary=self._summarize(primary_cases),
+            shadow_summary=self._summarize(shadow_cases),
+            diffs=diffs,
+        )
+        if persist:
+            self.run_store.save_run(run.run_id, run.model_dump(mode="json"))
+        return run
+
+    def _run_case(self, sample: EvalSample, retrieval_service: RetrievalService | None = None) -> EvalCaseResult:
         started_at = utcnow()
         user = UserContext(
             user_id=sample.user_id,
@@ -61,7 +128,8 @@ class OfflineEvaluationService:
             role=sample.role,
             clearance_level=sample.clearance_level,
         )
-        explanation = self.retrieval_service.explain(user, sample.query, top_k=5)
+        active_retrieval = retrieval_service or self.retrieval_service
+        explanation = active_retrieval.explain(user, sample.query, top_k=5)
         assembled_context = self.context_builder.build(explanation.results)
         prompt_build = self.prompt_builder.build_chat_prompt(
             scene=sample.scene,
@@ -106,6 +174,26 @@ class OfflineEvaluationService:
             validation_missing_sections=generation.validation_result.missing_sections,
             answer_preview=generation.answer[:240],
             citations=[item.title for item in assembled_context.citations],
+        )
+
+    def _build_shadow_retrieval_service(self) -> RetrievalService:
+        required_attributes = (
+            "document_service",
+            "keyword_backend",
+            "vector_backend",
+            "query_planning",
+            "recall_planning",
+        )
+        if not all(hasattr(self.retrieval_service, attribute) for attribute in required_attributes):
+            return self.retrieval_service
+        return RetrievalService(
+            document_service=self.retrieval_service.document_service,
+            keyword_backend=self.retrieval_service.keyword_backend,
+            vector_backend=self.retrieval_service.vector_backend,
+            retrieval_cache=None,
+            reranker=HeuristicReranker(mode="heuristic", top_n=8),
+            query_planning=self.retrieval_service.query_planning,
+            recall_planning=self.retrieval_service.recall_planning,
         )
 
     @staticmethod
