@@ -14,8 +14,10 @@
 ### `application`
 - 负责跨领域的流程编排，是在线问答链路的主承载层。
 - 当前在线问答相关模块：
-  - `app/application/conversation`
-    - 会话上下文、follow-up、session cache
+  - `app/application/access`
+    - access filter、access signature、权限边界收敛
+  - `app/application/session`
+    - session context、follow-up、history summary、session cache
   - `app/application/query`
     - query understanding、rewrite、query planning
   - `app/application/retrieval`
@@ -53,7 +55,10 @@
 当前在线问答链路对应关系如下：
 
 1. `Access / Session`
-   - `app/application/conversation/memory.py`
+   - `app/application/access/service.py`
+   - `app/application/session/service.py`
+   - `app/application/session/cache.py`
+   - `app/application/session/summarizer.py`
 2. `Query Planning`
    - `app/application/query/planning.py`
    - `app/application/query/understanding.py`
@@ -82,6 +87,8 @@
   - 用于端到端流程编排，例如 `ChatOrchestrator`
 - `*PlanningService`
   - 用于“决定下一步怎么做”的计划层，例如 `QueryPlanningService`、`RecallPlanningService`
+- `*ContextService`
+  - 用于承接请求级或会话级上下文构建，例如 `SessionContextService`
 - `*BuilderService`
   - 用于把上游结果组装成下游可消费对象，例如 `ContextBuilderService`、`PromptBuilderService`
 - `*RerankService`

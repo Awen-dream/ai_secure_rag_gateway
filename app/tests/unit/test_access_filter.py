@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from app.domain.auth.filter_builder import AccessFilter, build_access_filter
+from app.application.access.service import AccessFilter, build_access_filter
 from app.domain.auth.models import UserContext
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 

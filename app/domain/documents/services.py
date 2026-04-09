@@ -5,8 +5,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from app.application.access.service import build_access_filter
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
-from app.domain.auth.filter_builder import build_access_filter
 from app.domain.auth.models import UserContext
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.documents.schemas import DocumentUploadRequest

@@ -8,7 +8,7 @@ from app.domain.documents.models import DocumentChunk, DocumentRecord
 
 
 class AccessFilter(BaseModel):
-    """Unified permission filter shared by document reads and retrieval backends."""
+    """Request-scoped access filter shared by reads and retrieval backends."""
 
     tenant_id: str
     user_id: str
@@ -18,7 +18,7 @@ class AccessFilter(BaseModel):
     visibility_scope: list[str] = Field(default_factory=lambda: ["public", "tenant", "department", "owner"])
 
     def allows_document(self, document: DocumentRecord) -> bool:
-        """Return whether one document can be read under the current access scope."""
+        """Return whether one document is visible under the current access scope."""
 
         return (
             document.current
@@ -29,14 +29,14 @@ class AccessFilter(BaseModel):
         )
 
     def allows_chunk(self, chunk: DocumentChunk) -> bool:
-        """Return whether one chunk can participate in retrieval under the current access scope."""
+        """Return whether one chunk may participate in retrieval under the current access scope."""
 
         role_ok = not chunk.role_scope or self.role in chunk.role_scope
         department_ok = can_access_department(chunk.department_scope, self.to_user_context())
         return role_ok and department_ok and chunk.security_level <= self.max_security_level
 
     def build_elasticsearch_filters(self, allowed_chunk_ids: list[str] | None = None) -> list[dict]:
-        """Build one Elasticsearch filter list aligned with current tenant and access boundaries."""
+        """Build Elasticsearch filters aligned with tenant and access boundaries."""
 
         filters: list[dict] = [
             {"term": {"tenant_id": self.tenant_id}},
@@ -100,7 +100,7 @@ class AccessFilter(BaseModel):
         return filters
 
     def build_pgvector_params(self, allowed_chunk_ids: list[str]) -> dict:
-        """Build one parameter bundle used by pgvector search SQL templates."""
+        """Build the parameter bundle used by pgvector search SQL templates."""
 
         return {
             "tenant_id": self.tenant_id,
@@ -112,7 +112,7 @@ class AccessFilter(BaseModel):
         }
 
     def build_pgvector_where_clause(self) -> str:
-        """Build the permission-aware SQL predicate shared by pgvector plans and execution."""
+        """Build the permission-aware SQL predicate shared by pgvector planning and execution."""
 
         return (
             "tenant_id = %(tenant_id)s "
@@ -150,4 +150,18 @@ def build_access_filter(user: UserContext) -> AccessFilter:
         department_id=user.department_id,
         role=user.role,
         max_security_level=user.clearance_level,
+    )
+
+
+def build_access_signature(user: UserContext) -> str:
+    """Render one compact access signature so session state resets on auth changes."""
+
+    return "|".join(
+        [
+            user.tenant_id,
+            user.user_id,
+            user.department_id,
+            user.role,
+            str(user.clearance_level),
+        ]
     )

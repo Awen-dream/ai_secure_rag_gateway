@@ -1,17 +1,17 @@
 from functools import lru_cache
 
-from app.application.context.builder import ContextBuilderService
 from app.application.chat.orchestrator import ChatOrchestrator
-from app.application.conversation.memory import ConversationManager
+from app.application.context.builder import ContextBuilderService
 from app.application.generation.service import GenerationService
 from app.application.prompting.builder import PromptBuilderService
 from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.application.retrieval.planning import RecallPlanningService
 from app.application.query.planning import QueryPlanningService
+from app.application.session.cache import SessionCache
+from app.application.session.service import SessionContextService
 from app.application.query.understanding import QueryUnderstandingService
 from app.core.config import settings
-from app.application.conversation.session_cache import SessionCache
 from app.application.query.retrieval_cache import RetrievalCache
 from app.domain.audit.services import AuditService
 from app.domain.documents.services import DocumentService
@@ -321,7 +321,7 @@ def get_chat_service() -> ChatOrchestrator:
         generation_service=get_generation_service(),
         context_builder=get_context_builder_service(),
         session_cache=get_session_cache(),
-        conversation_manager=ConversationManager(
+        session_context_service=SessionContextService(
             get_repository(),
             query_planning=get_query_planning_service(),
         ),

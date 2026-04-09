@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from app.application.conversation.session_cache import SessionCache
+from app.application.session.cache import SessionCache
 from app.application.query.retrieval_cache import RetrievalCache
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatSession, SessionStatus

@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.application.access.service import build_access_filter
 from app.application.context.builder import ContextBuilderService
 from app.application.prompting.builder import PromptBuilderService
 from app.api.deps import (
@@ -19,7 +20,6 @@ from app.api.deps import (
     get_retrieval_service,
     get_vector_backend,
 )
-from app.domain.auth.filter_builder import build_access_filter
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService

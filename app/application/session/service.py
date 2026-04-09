@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.application.conversation.summarizer import summarize_long_history
+from app.application.access.service import build_access_signature
 from app.application.query.intent import classify_query_intent
 from app.application.query.planning import QueryPlanningResult, QueryPlanningService
 from app.application.query.rewrite import QueryRewritePlan, rewrite_query
 from app.application.query.understanding import QueryUnderstandingResult, QueryUnderstandingService
+from app.application.session.summarizer import summarize_long_history
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession
 from app.infrastructure.db.repositories.base import MetadataRepository
@@ -30,13 +31,15 @@ FOLLOW_UP_MARKERS = {
 
 
 @dataclass(frozen=True)
-class ConversationContext:
+class SessionContext:
+    """Session-layer output consumed by chat orchestration and audit logging."""
+
     query_plan: QueryPlanningResult
     session_summary: str
     topic_switched: bool
     active_topic: str
     used_history: bool
-    permission_signature: str
+    access_signature: str
 
     @property
     def rewritten_query(self) -> str:
@@ -51,22 +54,8 @@ class ConversationContext:
         return self.query_plan.understanding
 
 
-def build_permission_signature(user: UserContext) -> str:
-    """Render one compact permission signature so context can be reset on auth changes."""
-
-    return "|".join(
-        [
-            user.tenant_id,
-            user.user_id,
-            user.department_id,
-            user.role,
-            str(user.clearance_level),
-        ]
-    )
-
-
-class ConversationManager:
-    """Owns follow-up rewriting, topic tracking, and permission-aware session context reuse."""
+class SessionContextService:
+    """Owns follow-up rewriting, topic tracking, and access-aware session reuse."""
 
     def __init__(
         self,
@@ -77,18 +66,18 @@ class ConversationManager:
         self.repository = repository
         self.query_planning = query_planning or QueryPlanningService(query_understanding or QueryUnderstandingService())
 
-    def build_context(self, session: ChatSession, user: UserContext, query: str) -> ConversationContext:
-        """Rewrite the current query using recent history, topic continuity, and permission boundaries."""
+    def build_context(self, session: ChatSession, user: UserContext, query: str) -> SessionContext:
+        """Build one session context using history continuity and current access boundaries."""
 
         messages = self.repository.list_messages(session.id)
-        permission_signature = build_permission_signature(user)
-        permission_changed = bool(session.permission_signature and session.permission_signature != permission_signature)
-        summary = "" if permission_changed else (session.summary or summarize_long_history(messages))
+        access_signature = build_access_signature(user)
+        access_changed = bool(session.permission_signature and session.permission_signature != access_signature)
+        summary = "" if access_changed else (session.summary or summarize_long_history(messages))
         last_user_query = self._last_user_query(messages)
         active_topic = self._infer_topic(query)
         previous_topic = session.active_topic or self._infer_topic(last_user_query)
         topic_switched = self._did_topic_switch(previous_topic, active_topic)
-        should_use_history = bool(messages) and not permission_changed and not topic_switched and self._is_follow_up(query)
+        should_use_history = bool(messages) and not access_changed and not topic_switched and self._is_follow_up(query)
 
         query_plan = self.query_planning.plan(
             query,
@@ -96,17 +85,17 @@ class ConversationManager:
             session_summary=summary if should_use_history else None,
         )
 
-        if permission_changed:
+        if access_changed:
             active_topic = self._infer_topic(query)
             summary = ""
 
-        return ConversationContext(
+        return SessionContext(
             query_plan=query_plan,
             session_summary=summary,
-            topic_switched=topic_switched or permission_changed,
+            topic_switched=topic_switched or access_changed,
             active_topic=active_topic,
             used_history=should_use_history,
-            permission_signature=permission_signature,
+            access_signature=access_signature,
         )
 
     @staticmethod

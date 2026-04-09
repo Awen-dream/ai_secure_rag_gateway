@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from app.application.access.service import build_access_filter
 from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.retrieval.planning import RecallFilterPlan, RecallPlan, RecallPlanningService
 from app.application.query.planning import QueryPlanningResult, QueryPlanningService
 from app.application.query.retrieval_cache import RetrievalCache
-from app.domain.auth.filter_builder import build_access_filter
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
 from app.domain.retrieval.backends import KeywordSearchBackend, VectorSearchBackend

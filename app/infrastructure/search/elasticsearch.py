@@ -4,7 +4,7 @@ import json
 from urllib import error, request
 from typing import Sequence
 
-from app.domain.auth.filter_builder import AccessFilter
+from app.application.access.service import AccessFilter
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 from app.domain.retrieval.backends import BackendSearchHit
 from app.domain.retrieval.models import RetrievalBackendHealth, RetrievalBackendInfo

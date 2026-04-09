@@ -4,12 +4,13 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from app.application.access.service import build_access_signature
 from app.application.context.builder import ContextBuilderService
-from app.application.conversation.memory import ConversationManager, build_permission_signature
-from app.application.conversation.session_cache import SessionCache
-from app.application.conversation.summarizer import summarize_long_history
 from app.application.generation.service import GenerationService
 from app.application.prompting.builder import PromptBuilderService
+from app.application.session.cache import SessionCache
+from app.application.session.service import SessionContextService
+from app.application.session.summarizer import summarize_long_history
 from app.domain.audit.services import AuditService
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession, SessionStatus
@@ -36,7 +37,7 @@ class ChatOrchestrator:
         generation_service: GenerationService,
         context_builder: ContextBuilderService | None = None,
         session_cache: SessionCache | None = None,
-        conversation_manager: ConversationManager | None = None,
+        session_context_service: SessionContextService | None = None,
     ) -> None:
         self.repository = repository
         self.retrieval_service = retrieval_service
@@ -46,7 +47,7 @@ class ChatOrchestrator:
         self.generation_service = generation_service
         self.context_builder = context_builder or ContextBuilderService()
         self.session_cache = session_cache
-        self.conversation_manager = conversation_manager or ConversationManager(repository)
+        self.session_context_service = session_context_service or SessionContextService(repository)
 
     def query(self, payload: ChatQueryRequest, user: UserContext) -> ChatQueryResponse:
         """Execute one secure RAG chat request end to end."""
@@ -57,21 +58,21 @@ class ChatOrchestrator:
             cached_summary = self.session_cache.get_summary(session.id)
             if cached_summary:
                 session.summary = cached_summary
-        conversation_context = self.conversation_manager.build_context(session, user, payload.query)
+        session_context = self.session_context_service.build_context(session, user, payload.query)
         request_id = f"req_{uuid.uuid4().hex[:12]}"
         retrieved = self.retrieval_service.retrieve(
             user,
             payload.query,
-            query_plan=conversation_context.query_plan,
+            query_plan=session_context.query_plan,
         )
-        risk_action, risk_level = self.policy_engine.evaluate(user, conversation_context.rewritten_query, len(retrieved))
+        risk_action, risk_level = self.policy_engine.evaluate(user, session_context.rewritten_query, len(retrieved))
         input_risk_action = risk_action
         assembled_context = self.context_builder.build(retrieved)
         prompt_build = self.prompt_builder.build_chat_prompt(
             scene=payload.scene,
-            query=conversation_context.rewritten_query,
+            query=session_context.rewritten_query,
             assembled_context=assembled_context,
-            session_summary=conversation_context.session_summary,
+            session_summary=session_context.session_summary,
         )
         generation = self.generation_service.generate_chat_answer(
             user=user,
@@ -86,8 +87,8 @@ class ChatOrchestrator:
 
         self._append_message(session.id, "user", payload.query)
         self._append_message(session.id, "assistant", answer, citations)
-        session.active_topic = conversation_context.active_topic
-        session.permission_signature = conversation_context.permission_signature or build_permission_signature(user)
+        session.active_topic = session_context.active_topic
+        session.permission_signature = session_context.access_signature or build_access_signature(user)
         session.summary = summarize_long_history(self.repository.list_messages(session.id))
         session.updated_at = utcnow()
         self.repository.save_session(session)
@@ -101,7 +102,7 @@ class ChatOrchestrator:
             session_id=session.id,
             request_id=request_id,
             query=payload.query,
-            rewritten_query=conversation_context.rewritten_query,
+            rewritten_query=session_context.rewritten_query,
             scene=payload.scene,
             retrieved=retrieved,
             answer=answer,
@@ -109,7 +110,7 @@ class ChatOrchestrator:
             action=risk_action.value,
             latency_ms=latency_ms,
             template=prompt_build.template,
-            conversation_context=conversation_context,
+            session_context=session_context,
             input_action=input_risk_action.value,
             output_guard_result=generation.guard_result,
             validation_result=generation.validation_result,
@@ -122,8 +123,8 @@ class ChatOrchestrator:
             citations=citations,
             risk_action=risk_action,
             retrieved_chunks=len(retrieved),
-            rewritten_query=conversation_context.rewritten_query,
-            topic_switched=conversation_context.topic_switched,
+            rewritten_query=session_context.rewritten_query,
+            topic_switched=session_context.topic_switched,
         )
 
     def list_sessions(self, user: UserContext) -> list[ChatSession]:
@@ -164,7 +165,7 @@ class ChatOrchestrator:
             user_id=user.user_id,
             scene=payload.scene,
             status=SessionStatus.ACTIVE,
-            permission_signature=build_permission_signature(user),
+            permission_signature=build_access_signature(user),
             created_at=now,
             updated_at=now,
         )

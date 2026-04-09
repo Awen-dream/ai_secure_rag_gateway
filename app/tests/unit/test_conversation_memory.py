@@ -2,7 +2,8 @@ import unittest
 from datetime import datetime
 from typing import Optional
 
-from app.application.conversation.memory import ConversationManager, build_permission_signature
+from app.application.access.service import build_access_signature
+from app.application.session.service import SessionContextService
 from app.application.query.understanding import QueryUnderstandingResult
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession, SessionStatus
@@ -82,11 +83,11 @@ class ConversationMemoryTest(unittest.TestCase):
             scene="standard_qa",
             status=SessionStatus.ACTIVE,
             active_topic="policy",
-            permission_signature=build_permission_signature(build_user()),
+            permission_signature=build_access_signature(build_user()),
             created_at=datetime(2026, 1, 1),
             updated_at=datetime(2026, 1, 1),
         )
-        manager = ConversationManager(_Repo(messages))
+        manager = SessionContextService(_Repo(messages))
 
         context = manager.build_context(session, build_user(), "审批时限呢？")
 
@@ -111,11 +112,11 @@ class ConversationMemoryTest(unittest.TestCase):
             scene="standard_qa",
             status=SessionStatus.ACTIVE,
             active_topic="policy",
-            permission_signature=build_permission_signature(build_user()),
+            permission_signature=build_access_signature(build_user()),
             created_at=datetime(2026, 1, 1),
             updated_at=datetime(2026, 1, 1),
         )
-        manager = ConversationManager(_Repo(messages))
+        manager = SessionContextService(_Repo(messages))
 
         context = manager.build_context(session, build_user(), "这个接口规范在哪里？")
 
@@ -141,11 +142,11 @@ class ConversationMemoryTest(unittest.TestCase):
             status=SessionStatus.ACTIVE,
             summary="old summary",
             active_topic="policy",
-            permission_signature=build_permission_signature(build_user()),
+            permission_signature=build_access_signature(build_user()),
             created_at=datetime(2026, 1, 1),
             updated_at=datetime(2026, 1, 1),
         )
-        manager = ConversationManager(_Repo(messages))
+        manager = SessionContextService(_Repo(messages))
 
         context = manager.build_context(session, build_user(clearance=4), "审批时限呢？")
 
@@ -177,12 +178,12 @@ class ConversationMemoryTest(unittest.TestCase):
             scene="standard_qa",
             status=SessionStatus.ACTIVE,
             active_topic="policy",
-            permission_signature=build_permission_signature(build_user()),
+            permission_signature=build_access_signature(build_user()),
             created_at=datetime(2026, 1, 1),
             updated_at=datetime(2026, 1, 1),
         )
         understanding = _Understanding("报销制度的审批时限是什么？")
-        manager = ConversationManager(_Repo(messages), query_understanding=understanding)
+        manager = SessionContextService(_Repo(messages), query_understanding=understanding)
 
         context = manager.build_context(session, build_user(), "审批时限呢？")
 

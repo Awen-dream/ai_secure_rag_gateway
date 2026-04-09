@@ -1,3 +1,4 @@
+from app.application.session.service import SessionContext
 import uuid
 from datetime import datetime
 
@@ -7,7 +8,6 @@ from app.domain.prompts.models import PromptTemplate, PromptValidationResult
 from app.domain.retrieval.models import RetrievalResult
 from app.domain.risk.models import OutputGuardResult
 from app.domain.risk.models import RiskAction
-from app.application.conversation.memory import ConversationContext
 from app.infrastructure.db.repositories.base import MetadataRepository
 
 
@@ -33,14 +33,14 @@ class AuditService:
         action: str,
         latency_ms: int,
         template: PromptTemplate,
-        conversation_context: ConversationContext,
+        session_context: SessionContext,
         input_action: str,
         output_guard_result: OutputGuardResult,
         validation_result: PromptValidationResult,
     ) -> None:
         """Persist one structured audit record spanning retrieval, prompt, conversation and risk decisions."""
 
-        understanding = conversation_context.query_understanding
+        understanding = session_context.query_understanding
         self.repository.append_audit_log(
             AuditLog(
                 id=f"audit_{uuid.uuid4().hex[:12]}",
@@ -92,11 +92,11 @@ class AuditService:
                     "rule_intent": understanding.rule_intent,
                     "rule_intent_confidence": understanding.rule_confidence,
                     "rule_intent_reasons": understanding.rule_reasons,
-                    "topic_switched": conversation_context.topic_switched,
-                    "used_history": conversation_context.used_history,
-                    "active_topic": conversation_context.active_topic,
-                    "permission_signature": conversation_context.permission_signature,
-                    "session_summary": conversation_context.session_summary[:240],
+                    "topic_switched": session_context.topic_switched,
+                    "used_history": session_context.used_history,
+                    "active_topic": session_context.active_topic,
+                    "permission_signature": session_context.access_signature,
+                    "session_summary": session_context.session_summary[:240],
                 },
                 response_summary=answer[:240],
                 action=action,

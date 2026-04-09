@@ -4,7 +4,7 @@ from typing import Protocol, Sequence
 
 from pydantic import BaseModel, Field
 
-from app.domain.auth.filter_builder import AccessFilter
+from app.application.access.service import AccessFilter
 from app.domain.documents.models import DocumentChunk, DocumentRecord
 
 
