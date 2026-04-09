@@ -8,6 +8,11 @@ class EvalSample(BaseModel):
     id: str
     query: str
     scene: str = "standard_qa"
+    status: str = "active"
+    reviewed: bool = False
+    reviewed_by: str = ""
+    labels: list[str] = Field(default_factory=list)
+    notes: str = ""
     expected_doc_ids: list[str] = Field(default_factory=list)
     expected_titles: list[str] = Field(default_factory=list)
     expected_answer_contains: list[str] = Field(default_factory=list)
@@ -48,6 +53,76 @@ class EvalRunSummary(BaseModel):
     answer_valid_rate: float = 0.0
     average_latency_ms: float = 0.0
     average_retrieved_chunks: float = 0.0
+
+
+class EvalDatasetStats(BaseModel):
+    total_samples: int = 0
+    active_samples: int = 0
+    reviewed_samples: int = 0
+    coverage_rate: float = 0.0
+    scenes: dict[str, int] = Field(default_factory=dict)
+    labels: dict[str, int] = Field(default_factory=dict)
+    statuses: dict[str, int] = Field(default_factory=dict)
+
+
+class EvalDatasetImportRequest(BaseModel):
+    mode: str = "replace"
+    samples: list[EvalSample] = Field(default_factory=list)
+
+
+class EvalDatasetImportResult(BaseModel):
+    mode: str = "replace"
+    sample_count: int = 0
+    created_count: int = 0
+    updated_count: int = 0
+
+
+class EvalDatasetExport(BaseModel):
+    format: str = "json"
+    sample_count: int = 0
+    samples: list[EvalSample] = Field(default_factory=list)
+    jsonl: str = ""
+
+
+class EvalSampleTemplate(BaseModel):
+    scene: str = "standard_qa"
+    sample: EvalSample
+    batch_example: list[EvalSample] = Field(default_factory=list)
+
+
+class EvalBulkAnnotationRequest(BaseModel):
+    sample_ids: list[str] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
+    status: Optional[str] = None
+    reviewed: Optional[bool] = None
+    reviewed_by: str = ""
+    notes: str = ""
+    replace_labels: bool = False
+
+
+class EvalBulkAnnotationResult(BaseModel):
+    updated_count: int = 0
+    updated_ids: list[str] = Field(default_factory=list)
+
+
+class EvalQualityBaseline(BaseModel):
+    id: str = "default"
+    name: str = "Default Quality Baseline"
+    min_evidence_hit_rate: float = 0.8
+    target_evidence_hit_rate: float = 0.9
+    min_answer_valid_rate: float = 0.95
+    min_answer_match_rate: float = 0.75
+    target_answer_match_rate: float = 0.85
+    regression_warning_drop: float = 0.05
+    regression_block_drop: float = 0.1
+    max_latency_ms: float = 1200.0
+    latency_warning_increase_ms: float = 100.0
+    latency_warning_multiplier: float = 1.2
+    require_shadow_run: bool = True
+    shadow_must_not_lose: bool = True
+    minimum_review_coverage: float = 0.0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class EvalQualityGate(BaseModel):
@@ -141,7 +216,25 @@ class ReleaseReadinessReport(BaseModel):
     decision: str = "hold"
     latest_offline_run_id: str = ""
     latest_shadow_run_id: str = ""
+    baseline: EvalQualityBaseline = Field(default_factory=EvalQualityBaseline)
+    dataset_stats: EvalDatasetStats = Field(default_factory=EvalDatasetStats)
     quality_gate: EvalQualityGate = Field(default_factory=EvalQualityGate)
     trend: EvalTrendSummary = Field(default_factory=EvalTrendSummary)
     shadow_report: ShadowReportSummary = Field(default_factory=ShadowReportSummary)
     reasons: list[str] = Field(default_factory=list)
+
+
+class ReleaseGateCheck(BaseModel):
+    name: str
+    status: str = "pass"
+    severity: str = "info"
+    detail: str = ""
+
+
+class ReleaseGateReport(BaseModel):
+    generated_at: datetime
+    decision: str = "hold"
+    passed: bool = False
+    allow_review: bool = False
+    checks: list[ReleaseGateCheck] = Field(default_factory=list)
+    release_readiness: ReleaseReadinessReport

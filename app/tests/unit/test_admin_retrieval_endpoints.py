@@ -67,8 +67,10 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         self.db_path = "/tmp/secure_rag_gateway_admin_retrieval.db"
         self.eval_path = "/tmp/secure_rag_gateway_admin_eval.jsonl"
         self.eval_runs_dir = Path("/tmp/secure_rag_gateway_admin_eval_runs")
+        self.eval_baseline_path = "/tmp/secure_rag_gateway_admin_eval_baseline.json"
         Path(self.db_path).unlink(missing_ok=True)
         Path(self.eval_path).unlink(missing_ok=True)
+        Path(self.eval_baseline_path).unlink(missing_ok=True)
         if self.eval_runs_dir.exists():
             for path in self.eval_runs_dir.glob("*.json"):
                 path.unlink()
@@ -79,6 +81,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["APP_EVAL_DATASET_PATH"] = self.eval_path
         os.environ["APP_EVAL_RUNS_DIR"] = str(self.eval_runs_dir)
+        os.environ["APP_EVAL_BASELINE_PATH"] = self.eval_baseline_path
         os.environ["APP_REDIS_MODE"] = "local-fallback"
         os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
         os.environ["OPENAI_API_KEY"] = ""
@@ -89,6 +92,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         settings.sqlite_path = self.db_path
         settings.eval_dataset_path = self.eval_path
         settings.eval_runs_dir = str(self.eval_runs_dir)
+        settings.eval_baseline_path = self.eval_baseline_path
         settings.redis_mode = "local-fallback"
         settings.rate_limit_max_requests = 30
         settings.openai_api_key = None
@@ -103,6 +107,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_document_ingestion_orchestrator,
             get_document_source_store,
             get_document_task_queue,
+            get_eval_baseline_store,
             get_eval_dataset_store,
             get_eval_run_store,
             get_embedding_client,
@@ -149,6 +154,7 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
             get_document_ingestion_orchestrator,
             get_document_ingestion_worker,
             get_document_service,
+            get_eval_baseline_store,
             get_eval_dataset_store,
             get_eval_run_store,
             get_retrieval_reranker,

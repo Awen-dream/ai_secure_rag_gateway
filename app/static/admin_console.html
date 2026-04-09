@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secure Enterprise RAG Gateway Admin Console</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf8;
+      --ink: #1f2933;
+      --muted: #6b7280;
+      --line: #d8d2c4;
+      --accent: #0f766e;
+      --accent-soft: #d9f2ef;
+      --danger: #b42318;
+      --warn: #b54708;
+      --shadow: 0 16px 40px rgba(31, 41, 51, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.10), transparent 28%),
+        radial-gradient(circle at right center, rgba(181, 71, 8, 0.08), transparent 26%),
+        linear-gradient(180deg, #f8f4eb 0%, #f2ede2 100%);
+    }
+    .shell {
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    .hero {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding: 28px;
+      border: 1px solid rgba(15, 118, 110, 0.18);
+      border-radius: 24px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.92), rgba(217,242,239,0.65));
+      box-shadow: var(--shadow);
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 920px;
+    }
+    .grid {
+      display: grid;
+      gap: 20px;
+    }
+    .grid.two {
+      grid-template-columns: 360px minmax(0, 1fr);
+      align-items: start;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+    .panel-header h2, .panel-header h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+    .panel-body {
+      padding: 18px 20px 22px;
+    }
+    .stack { display: grid; gap: 14px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    .metric {
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff, #faf7f0);
+    }
+    .metric-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .metric-value {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .metric-note {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .subgrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .block {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      background: #fff;
+    }
+    .block h4 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    .inline {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .triple {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      color: white;
+      background: var(--accent);
+    }
+    button.secondary {
+      color: var(--ink);
+      background: #ece7da;
+    }
+    button.warn {
+      background: var(--warn);
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .status {
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid rgba(216, 210, 196, 0.75);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .mono {
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .muted { color: var(--muted); }
+    .danger { color: var(--danger); }
+    @media (max-width: 1100px) {
+      .grid.two { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <span class="pill">Secure Enterprise RAG Gateway</span>
+      <h1>Admin Console</h1>
+      <p>内置的管理控制台，面向评测平台、后台治理和运营看板。页面本身不持有会话，请先在左侧填写管理员请求头，再执行各类查询和操作。</p>
+    </section>
+
+    <div class="grid two">
+      <aside class="panel">
+        <div class="panel-header">
+          <h2>Admin Headers</h2>
+          <button class="secondary" id="saveHeadersBtn">保存</button>
+        </div>
+        <div class="panel-body stack">
+          <label>用户 ID<input id="hdrUserId" value="admin_console" /></label>
+          <label>租户 ID<input id="hdrTenantId" value="platform" /></label>
+          <label>部门 ID<input id="hdrDepartmentId" value="engineering" /></label>
+          <label>角色<input id="hdrRole" value="admin" /></label>
+          <label>密级<input id="hdrClearance" type="number" min="0" max="10" value="5" /></label>
+          <div class="status" id="headerStatus">当前页面需要通过请求头访问后台接口。</div>
+        </div>
+      </aside>
+
+      <main class="grid">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Operations Dashboard</h2>
+            <div class="actions">
+              <button id="refreshDashboardBtn">刷新看板</button>
+              <button class="secondary" id="refreshMetricsBtn">刷新评测</button>
+            </div>
+          </div>
+          <div class="panel-body stack">
+            <div class="cards" id="dashboardCards"></div>
+            <div class="subgrid">
+              <div class="block">
+                <h4>Top Questions</h4>
+                <table><thead><tr><th>问题</th><th>次数</th></tr></thead><tbody id="topQuestionsBody"></tbody></table>
+              </div>
+              <div class="block">
+                <h4>Top Documents</h4>
+                <table><thead><tr><th>文档</th><th>命中</th></tr></thead><tbody id="topDocumentsBody"></tbody></table>
+              </div>
+              <div class="block">
+                <h4>Evaluation & Release</h4>
+                <div class="status" id="evaluationSummary"></div>
+              </div>
+              <div class="block">
+                <h4>Infrastructure</h4>
+                <div class="status" id="infraSummary"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Evaluation Workbench</h2>
+            <div class="actions">
+              <button id="bootstrapDatasetBtn">生成评测集</button>
+              <button class="secondary" id="runEvalBtn">运行 Offline Eval</button>
+              <button class="secondary" id="runShadowBtn">运行 Shadow Eval</button>
+            </div>
+          </div>
+          <div class="panel-body stack">
+            <label>替换评测数据集（JSON 数组）
+              <textarea id="datasetEditor">[
+  {
+    "id": "sample_finance_1",
+    "query": "报销审批时限是什么？",
+    "scene": "standard_qa",
+    "expected_titles": ["报销制度"],
+    "expected_answer_contains": ["3个工作日"]
+  }
+]</textarea>
+            </label>
+            <div class="actions">
+              <button id="replaceDatasetBtn">替换数据集</button>
+              <button class="secondary" id="loadDatasetBtn">读取数据集</button>
+              <button class="secondary" id="loadDatasetStatsBtn">读取数据集统计</button>
+              <button class="secondary" id="loadDatasetTemplateBtn">读取模板</button>
+              <button class="secondary" id="exportDatasetBtn">导出数据集</button>
+              <button class="secondary" id="loadRunsBtn">读取评测历史</button>
+            </div>
+            <div class="subgrid">
+              <div class="block">
+                <h4>Dataset</h4>
+                <div class="status mono" id="datasetStatus"></div>
+              </div>
+              <div class="block">
+                <h4>Latest Runs</h4>
+                <div class="status mono" id="runsStatus"></div>
+              </div>
+            </div>
+            <label>质量基线（JSON）
+              <textarea id="baselineEditor">{
+  "id": "default",
+  "name": "Default Quality Baseline",
+  "min_evidence_hit_rate": 0.8,
+  "target_evidence_hit_rate": 0.9,
+  "min_answer_valid_rate": 0.95,
+  "min_answer_match_rate": 0.75,
+  "target_answer_match_rate": 0.85,
+  "regression_warning_drop": 0.05,
+  "regression_block_drop": 0.1,
+  "max_latency_ms": 1200.0,
+  "latency_warning_increase_ms": 100.0,
+  "latency_warning_multiplier": 1.2,
+  "require_shadow_run": true,
+  "shadow_must_not_lose": true,
+  "minimum_review_coverage": 0.7
+}</textarea>
+            </label>
+            <div class="actions">
+              <button class="secondary" id="loadBaselineBtn">读取基线</button>
+              <button id="saveBaselineBtn">保存基线</button>
+              <button class="secondary" id="loadReleaseGateBtn">查看发布门禁</button>
+            </div>
+            <label>批量标注（JSON）
+              <textarea id="annotationEditor">{
+  "sample_ids": [],
+  "labels": ["reviewed"],
+  "reviewed": true,
+  "reviewed_by": "qa_admin",
+  "notes": "批量标注"
+}</textarea>
+            </label>
+            <div class="actions">
+              <button class="secondary" id="bulkAnnotateBtn">批量标注</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Document Management</h2>
+            <div class="actions">
+              <button id="loadDocumentsBtn">加载文档</button>
+            </div>
+          </div>
+          <div class="panel-body stack">
+            <div class="triple">
+              <label>状态<input id="docStatusFilter" placeholder="success / failed / pending" /></label>
+              <label>来源类型<input id="docSourceFilter" placeholder="manual / pdf / feishu_docx" /></label>
+              <label>搜索<input id="docSearchFilter" placeholder="标题或标签" /></label>
+            </div>
+            <div class="inline">
+              <label>文档 ID<input id="retireDocId" placeholder="doc_xxx" /></label>
+              <label>退役原因<input id="retireReason" value="retired by admin console" /></label>
+            </div>
+            <div class="actions">
+              <button class="warn" id="retireDocBtn">退役文档</button>
+            </div>
+            <div class="status mono" id="documentStatus"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Audit Explorer</h2>
+            <div class="actions">
+              <button id="loadAuditBtn">查询审计</button>
+            </div>
+          </div>
+          <div class="panel-body stack">
+            <div class="inline">
+              <label>风险等级<input id="auditRiskFilter" placeholder="low / medium / high" /></label>
+              <label>动作<input id="auditActionFilter" placeholder="allow / mask / refuse / citations_only" /></label>
+            </div>
+            <label>关键词<input id="auditQueryFilter" placeholder="查询原始 query 或 rewritten query" /></label>
+            <div class="status mono" id="auditStatus"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const headerKeys = {
+      userId: "X-User-Id",
+      tenantId: "X-Tenant-Id",
+      departmentId: "X-Department-Id",
+      role: "X-Role",
+      clearance: "X-Clearance-Level",
+    };
+
+    function headersFromForm() {
+      return {
+        [headerKeys.userId]: document.getElementById("hdrUserId").value.trim(),
+        [headerKeys.tenantId]: document.getElementById("hdrTenantId").value.trim(),
+        [headerKeys.departmentId]: document.getElementById("hdrDepartmentId").value.trim(),
+        [headerKeys.role]: document.getElementById("hdrRole").value.trim(),
+        [headerKeys.clearance]: document.getElementById("hdrClearance").value.trim(),
+      };
+    }
+
+    function saveHeaders() {
+      localStorage.setItem("adminConsoleHeaders", JSON.stringify(headersFromForm()));
+      document.getElementById("headerStatus").textContent = "管理员请求头已保存，本页刷新后会自动恢复。";
+    }
+
+    function loadHeaders() {
+      const raw = localStorage.getItem("adminConsoleHeaders");
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        document.getElementById("hdrUserId").value = parsed[headerKeys.userId] || "admin_console";
+        document.getElementById("hdrTenantId").value = parsed[headerKeys.tenantId] || "platform";
+        document.getElementById("hdrDepartmentId").value = parsed[headerKeys.departmentId] || "engineering";
+        document.getElementById("hdrRole").value = parsed[headerKeys.role] || "admin";
+        document.getElementById("hdrClearance").value = parsed[headerKeys.clearance] || "5";
+      } catch (_error) {
+        // Ignore corrupt local state and keep defaults.
+      }
+    }
+
+    async function callApi(path, options = {}) {
+      const headers = { ...headersFromForm(), ...(options.headers || {}) };
+      const response = await fetch(path, { ...options, headers });
+      const text = await response.text();
+      let payload;
+      try { payload = text ? JSON.parse(text) : {}; } catch (_error) { payload = text; }
+      if (!response.ok) {
+        throw new Error(typeof payload === "string" ? payload : JSON.stringify(payload, null, 2));
+      }
+      return payload;
+    }
+
+    function renderMetrics(summary) {
+      const cards = [
+        ["文档总数", summary.documents.total, `当前生效 ${summary.documents.current}`],
+        ["总问答量", summary.traffic.total_queries, `24h ${summary.traffic.recent_queries_24h}`],
+        ["引用覆盖率", summary.quality.citation_coverage_rate, `改写率 ${summary.quality.rewrite_rate}`],
+        ["拒答率", summary.quality.refusal_rate, `平均延迟 ${summary.quality.average_latency_ms} ms`],
+        ["评测样本", summary.evaluation.dataset_size, `发布决策 ${summary.quality.latest_release_decision}`],
+        ["活跃会话", summary.traffic.active_sessions, `独立用户 ${summary.traffic.unique_users}`],
+      ];
+      document.getElementById("dashboardCards").innerHTML = cards.map(([label, value, note]) => `
+        <div class="metric">
+          <div class="metric-label">${label}</div>
+          <div class="metric-value">${value}</div>
+          <div class="metric-note">${note}</div>
+        </div>
+      `).join("");
+
+      document.getElementById("topQuestionsBody").innerHTML = (summary.top_questions || []).map(item => `
+        <tr><td>${item.query}</td><td>${item.count}</td></tr>
+      `).join("") || `<tr><td colspan="2" class="muted">暂无数据</td></tr>`;
+      document.getElementById("topDocumentsBody").innerHTML = (summary.top_documents || []).map(item => `
+        <tr><td>${item.title}</td><td>${item.hits}</td></tr>
+      `).join("") || `<tr><td colspan="2" class="muted">暂无数据</td></tr>`;
+      document.getElementById("evaluationSummary").textContent = JSON.stringify(summary.evaluation, null, 2);
+      document.getElementById("infraSummary").textContent = JSON.stringify(summary.operations, null, 2);
+    }
+
+    async function refreshDashboard() {
+      const summary = await callApi("/api/v1/admin/dashboard/summary");
+      renderMetrics(summary);
+    }
+
+    async function loadDataset() {
+      const payload = await callApi("/api/v1/admin/evaluation/dataset");
+      document.getElementById("datasetEditor").value = JSON.stringify(payload, null, 2);
+      document.getElementById("datasetStatus").textContent = `已加载 ${payload.length} 条评测样本`;
+    }
+
+    async function loadDatasetStats() {
+      const payload = await callApi("/api/v1/admin/evaluation/dataset/overview");
+      document.getElementById("datasetStatus").textContent = JSON.stringify(payload, null, 2);
+      document.getElementById("baselineEditor").value = JSON.stringify(payload.baseline, null, 2);
+    }
+
+    async function loadDatasetTemplate() {
+      const payload = await callApi("/api/v1/admin/evaluation/dataset/template?scene=standard_qa");
+      document.getElementById("datasetEditor").value = JSON.stringify(payload.batch_example, null, 2);
+      document.getElementById("datasetStatus").textContent = "已加载样本模板。";
+    }
+
+    async function exportDataset() {
+      const payload = await callApi("/api/v1/admin/evaluation/dataset/export?export_format=json");
+      document.getElementById("datasetStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function replaceDataset() {
+      const samples = JSON.parse(document.getElementById("datasetEditor").value);
+      const payload = await callApi("/api/v1/admin/evaluation/dataset/replace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(samples),
+      });
+      document.getElementById("datasetStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function bootstrapDataset() {
+      const payload = await callApi("/api/v1/admin/evaluation/dataset/bootstrap?limit=20", { method: "POST" });
+      document.getElementById("datasetStatus").textContent = JSON.stringify(payload, null, 2);
+      await loadDataset();
+    }
+
+    async function loadBaseline() {
+      const payload = await callApi("/api/v1/admin/evaluation/baseline");
+      document.getElementById("baselineEditor").value = JSON.stringify(payload, null, 2);
+      document.getElementById("runsStatus").textContent = "已加载质量基线。";
+    }
+
+    async function saveBaseline() {
+      const payload = await callApi("/api/v1/admin/evaluation/baseline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: document.getElementById("baselineEditor").value,
+      });
+      document.getElementById("runsStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function bulkAnnotate() {
+      const payload = await callApi("/api/v1/admin/evaluation/dataset/bulk-annotate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: document.getElementById("annotationEditor").value,
+      });
+      document.getElementById("datasetStatus").textContent = JSON.stringify(payload, null, 2);
+      await loadDatasetStats();
+    }
+
+    async function loadReleaseGate() {
+      const payload = await callApi("/api/v1/admin/evaluation/release-gate?allow_review=false");
+      document.getElementById("runsStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function runEvaluation(shadow = false) {
+      const path = shadow ? "/api/v1/admin/evaluation/run-shadow" : "/api/v1/admin/evaluation/run";
+      const payload = await callApi(path, { method: "POST" });
+      document.getElementById("runsStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function loadRuns() {
+      const payload = await callApi("/api/v1/admin/evaluation/runs?limit=10");
+      document.getElementById("runsStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function loadDocuments() {
+      const params = new URLSearchParams();
+      const status = document.getElementById("docStatusFilter").value.trim();
+      const sourceType = document.getElementById("docSourceFilter").value.trim();
+      const search = document.getElementById("docSearchFilter").value.trim();
+      if (status) params.set("status", status);
+      if (sourceType) params.set("source_type", sourceType);
+      if (search) params.set("search", search);
+      const payload = await callApi(`/api/v1/admin/documents?${params.toString()}`);
+      document.getElementById("documentStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function retireDocument() {
+      const docId = document.getElementById("retireDocId").value.trim();
+      if (!docId) {
+        document.getElementById("documentStatus").textContent = "请先填写要退役的文档 ID。";
+        return;
+      }
+      const reason = encodeURIComponent(document.getElementById("retireReason").value.trim() || "retired by admin console");
+      const payload = await callApi(`/api/v1/admin/documents/${docId}/retire?reason=${reason}`, { method: "POST" });
+      document.getElementById("documentStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function loadAudit() {
+      const params = new URLSearchParams({ limit: "50" });
+      const risk = document.getElementById("auditRiskFilter").value.trim();
+      const action = document.getElementById("auditActionFilter").value.trim();
+      const query = document.getElementById("auditQueryFilter").value.trim();
+      if (risk) params.set("risk_level", risk);
+      if (action) params.set("action", action);
+      if (query) params.set("query", query);
+      const payload = await callApi(`/api/v1/admin/audit?${params.toString()}`);
+      document.getElementById("auditStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    document.getElementById("saveHeadersBtn").addEventListener("click", saveHeaders);
+    document.getElementById("refreshDashboardBtn").addEventListener("click", () => refreshDashboard().catch(showError));
+    document.getElementById("refreshMetricsBtn").addEventListener("click", () => loadRuns().catch(showError));
+    document.getElementById("replaceDatasetBtn").addEventListener("click", () => replaceDataset().catch(showError));
+    document.getElementById("loadDatasetBtn").addEventListener("click", () => loadDataset().catch(showError));
+    document.getElementById("loadDatasetStatsBtn").addEventListener("click", () => loadDatasetStats().catch(showError));
+    document.getElementById("loadDatasetTemplateBtn").addEventListener("click", () => loadDatasetTemplate().catch(showError));
+    document.getElementById("exportDatasetBtn").addEventListener("click", () => exportDataset().catch(showError));
+    document.getElementById("bootstrapDatasetBtn").addEventListener("click", () => bootstrapDataset().catch(showError));
+    document.getElementById("runEvalBtn").addEventListener("click", () => runEvaluation(false).catch(showError));
+    document.getElementById("runShadowBtn").addEventListener("click", () => runEvaluation(true).catch(showError));
+    document.getElementById("loadRunsBtn").addEventListener("click", () => loadRuns().catch(showError));
+    document.getElementById("loadBaselineBtn").addEventListener("click", () => loadBaseline().catch(showError));
+    document.getElementById("saveBaselineBtn").addEventListener("click", () => saveBaseline().catch(showError));
+    document.getElementById("loadReleaseGateBtn").addEventListener("click", () => loadReleaseGate().catch(showError));
+    document.getElementById("bulkAnnotateBtn").addEventListener("click", () => bulkAnnotate().catch(showError));
+    document.getElementById("loadDocumentsBtn").addEventListener("click", () => loadDocuments().catch(showError));
+    document.getElementById("retireDocBtn").addEventListener("click", () => retireDocument().catch(showError));
+    document.getElementById("loadAuditBtn").addEventListener("click", () => loadAudit().catch(showError));
+
+    function showError(error) {
+      const message = error instanceof Error ? error.message : String(error);
+      document.getElementById("headerStatus").textContent = `请求失败：${message}`;
+      document.getElementById("headerStatus").classList.add("danger");
+    }
+
+    loadHeaders();
+    refreshDashboard().catch(showError);
+    loadDataset().catch(showError);
+    loadBaseline().catch(showError);
+    loadRuns().catch(showError);
+  </script>
+</body>
+</html>

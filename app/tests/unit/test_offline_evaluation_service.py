@@ -5,9 +5,10 @@ from pathlib import Path
 from app.application.context.builder import AssembledContext
 from app.application.evaluation.service import OfflineEvaluationService
 from app.domain.citations.services import Citation
-from app.domain.evaluation.models import EvalRunResult, EvalRunSummary, EvalSample
+from app.domain.evaluation.models import EvalBulkAnnotationRequest, EvalRunResult, EvalRunSummary, EvalSample
 from app.domain.prompts.models import PromptTemplate, PromptValidationResult, RenderedPrompt
 from app.domain.risk.models import RiskAction
+from app.infrastructure.storage.local_eval_baseline_store import LocalEvalBaselineStore
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
 from app.infrastructure.storage.local_eval_run_store import LocalEvalRunStore
 
@@ -128,7 +129,9 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dataset_path = Path("/tmp/secure_rag_gateway_eval_dataset.jsonl")
         self.runs_dir = Path("/tmp/secure_rag_gateway_eval_runs")
+        self.baseline_path = Path("/tmp/secure_rag_gateway_eval_baseline.json")
         self.dataset_path.unlink(missing_ok=True)
+        self.baseline_path.unlink(missing_ok=True)
         if self.runs_dir.exists():
             for path in self.runs_dir.glob("*.json"):
                 path.unlink()
@@ -149,6 +152,7 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         )
         return OfflineEvaluationService(
             dataset_store=store,
+            baseline_store=LocalEvalBaselineStore(str(self.baseline_path)),
             run_store=run_store,
             retrieval_service=_RetrievalServiceStub(),
             context_builder=_ContextBuilderStub(),
@@ -266,6 +270,39 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertEqual(release_report.latest_shadow_run_id, shadow_run.run_id)
         self.assertEqual(release_report.decision, "ready")
         self.assertEqual(release_report.quality_gate.status, "pass")
+
+    def test_dataset_stats_bulk_annotation_and_baseline_update(self) -> None:
+        service = self._build_service()
+
+        stats_before = service.dataset_stats()
+        self.assertEqual(stats_before.total_samples, 1)
+        self.assertEqual(stats_before.reviewed_samples, 0)
+
+        annotation = service.bulk_annotate(
+            EvalBulkAnnotationRequest(
+                sample_ids=["case_1"],
+                labels=["finance", "golden"],
+                reviewed=True,
+                reviewed_by="qa_admin",
+                notes="确认通过",
+            )
+        )
+        self.assertEqual(annotation.updated_count, 1)
+
+        stats_after = service.dataset_stats()
+        self.assertEqual(stats_after.reviewed_samples, 1)
+        self.assertEqual(stats_after.coverage_rate, 1.0)
+        self.assertEqual(stats_after.labels["finance"], 1)
+
+        baseline = service.get_quality_baseline()
+        baseline.minimum_review_coverage = 1.0
+        baseline.min_answer_match_rate = 0.9
+        updated = service.update_quality_baseline(baseline)
+        self.assertEqual(updated.minimum_review_coverage, 1.0)
+
+        release = service.build_release_readiness_report()
+        self.assertEqual(release.baseline.minimum_review_coverage, 1.0)
+        self.assertEqual(release.dataset_stats.reviewed_samples, 1)
 
 
 if __name__ == "__main__":

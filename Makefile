@@ -20,10 +20,12 @@ UNIT_TESTS = \
 	app.tests.unit.test_openai_embeddings \
 	app.tests.unit.test_query_intent \
 	app.tests.unit.test_query_understanding \
+	app.tests.unit.test_offline_evaluation_service \
 	app.tests.unit.test_chat_llm_integration \
 	app.tests.unit.test_chat_output_guard_integration \
 	app.tests.unit.test_output_guard \
 	app.tests.unit.test_retrieval_backends \
+	app.tests.unit.test_admin_console_endpoints \
 	app.tests.unit.test_admin_retrieval_endpoints
 
 INTEGRATION_TESTS = \
@@ -31,7 +33,7 @@ INTEGRATION_TESTS = \
 	app.tests.integration.test_postgres_metadata_repository_integration \
 	app.tests.integration.test_redis_integration
 
-.PHONY: install run run-ingestion-worker run-feishu-sync-scheduler test-unit test-integration test-all integration-up integration-down compile
+.PHONY: install run run-ingestion-worker run-feishu-sync-scheduler release-gate test-unit test-integration test-all integration-up integration-down compile
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -44,6 +46,9 @@ run-ingestion-worker:
 
 run-feishu-sync-scheduler:
 	PYTHONPATH=. $(PYTHON) scripts/run_feishu_sync_scheduler.py
+
+release-gate:
+	PYTHONPATH=. $(PYTHON) scripts/run_release_gate.py --json
 
 compile:
 	PYTHONPYCACHEPREFIX=/tmp/pycache $(PYTHON) -m py_compile $$(find app -name '*.py' -print) main.py

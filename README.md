@@ -15,6 +15,14 @@ uvicorn app.main:app --reload
 make run-ingestion-worker
 ```
 
+内置后台页面：
+
+```bash
+open http://127.0.0.1:8000/admin-console
+```
+
+页面本身用于调试和运营展示，真正访问后台数据时仍然通过管理员请求头调用 API。
+
 ## PGVector + Elasticsearch 联调
 
 先安装项目依赖，然后运行联调脚本：
@@ -119,6 +127,54 @@ make run-ingestion-worker
 
 - `GET /api/v1/admin/sources/feishu/health`
 
+## 评测平台、后台管理与运营看板
+
+当前版本已经内置一套轻量可用的评测与管理控制台能力：
+
+- `/admin-console`
+  - 可直接查看运营看板、评测数据集、评测运行历史、文档清单和审计日志
+- `/api/v1/admin/dashboard/summary`
+  - 聚合文档、流量、质量、风险、评测、缓存、队列和飞书连接器状态
+- `/api/v1/admin/documents`
+  - 管理侧文档清单，支持状态、来源类型和关键词过滤
+- `/api/v1/admin/documents/{doc_id}/retire`
+  - 退役文档并同步清理索引
+- `/api/v1/admin/evaluation/dataset/replace`
+  - 替换离线评测数据集
+- `/api/v1/admin/evaluation/dataset/bootstrap`
+  - 基于当前成功文档自动生成 starter 评测集
+- `/api/v1/admin/evaluation/dataset/upsert`
+  - 单条新增或更新评测样本
+- `/api/v1/admin/evaluation/dataset/import`
+  - 通过 `replace` 或 `upsert` 语义批量导入样本
+- `/api/v1/admin/evaluation/dataset/export`
+  - 导出当前评测集，返回 JSON 和 JSONL 文本
+- `/api/v1/admin/evaluation/dataset/template`
+  - 返回样本模板与批量示例
+- `/api/v1/admin/evaluation/dataset/bulk-annotate`
+  - 批量补 labels / reviewed / reviewed_by / notes
+- `/api/v1/admin/evaluation/baseline`
+  - 查看或更新质量基线
+- `/api/v1/admin/evaluation/release-gate`
+  - 返回显式的发布门禁 checklist 与 pass/fail 结论
+
+当前运营看板聚合的核心指标包括：
+
+- 文档总量、当前生效数、失败数、来源分布
+- 总问答量、24h 请求量、活跃会话、独立用户
+- 引用覆盖率、拒答率、改写率、平均延迟
+- 最新 offline/shadow evaluation 与 release readiness 决策
+- top questions、top documents、缓存/队列/飞书连接健康
+
+当前评测平台已经支持：
+
+- 评测样本 CRUD
+- 样本模板与批量导入导出
+- 批量标注与 review coverage 统计
+- 质量基线持久化
+- 基线驱动的 quality gate
+- release readiness gate
+
 ## Embedding 与 Rerank
 
 当前 PGVector 已支持切换到真实 embedding provider，并在混合检索后执行可插拔 reranker。
@@ -166,9 +222,32 @@ scripts/
 - `POST /api/v1/docs/{doc_id}/retry`
 - `POST /api/v1/chat/query`
 - `POST /api/v1/chat/stream`
+- `GET /admin-console`
 - `GET /api/v1/admin/prompts`
 - `GET /api/v1/admin/policies`
 - `GET /api/v1/admin/audit`
+- `GET /api/v1/admin/dashboard/summary`
+- `GET /api/v1/admin/documents`
+- `POST /api/v1/admin/documents/{doc_id}/retire`
+- `GET /api/v1/admin/evaluation/dataset`
+- `GET /api/v1/admin/evaluation/dataset/stats`
+- `GET /api/v1/admin/evaluation/dataset/overview`
+- `GET /api/v1/admin/evaluation/dataset/template`
+- `GET /api/v1/admin/evaluation/dataset/export`
+- `GET /api/v1/admin/evaluation/dataset/{sample_id}`
+- `POST /api/v1/admin/evaluation/dataset/upsert`
+- `POST /api/v1/admin/evaluation/dataset/import`
+- `DELETE /api/v1/admin/evaluation/dataset/{sample_id}`
+- `POST /api/v1/admin/evaluation/dataset/replace`
+- `POST /api/v1/admin/evaluation/dataset/bulk-annotate`
+- `POST /api/v1/admin/evaluation/dataset/bootstrap`
+- `GET /api/v1/admin/evaluation/baseline`
+- `POST /api/v1/admin/evaluation/baseline`
+- `POST /api/v1/admin/evaluation/run`
+- `POST /api/v1/admin/evaluation/run-shadow`
+- `GET /api/v1/admin/evaluation/runs`
+- `GET /api/v1/admin/evaluation/release-readiness`
+- `GET /api/v1/admin/evaluation/release-gate`
 - `GET /api/v1/admin/retrieval/backends`
 - `GET /api/v1/admin/retrieval/backends/{backend}/health`
 - `GET /api/v1/admin/cache/health`
@@ -258,6 +337,17 @@ scripts/
 - `async_mode` 时只负责入队，真实解析/切分/索引由独立 ingestion worker 消费 `APP_DOCUMENT_INGESTION_QUEUE_NAME`
 - 可通过 `retry` 入口重试失败文档
 - 飞书外部数据源导入：支持 `docx` 链接和 `wiki` 节点链接导入
+
+当前评测与治理层已包含：
+
+- 离线评测数据集存储、替换和 starter dataset bootstrap
+- 评测样本单条 upsert / delete / 批量标注
+- 样本模板、JSON/JSONL 导出、replace/upsert 导入
+- offline evaluation / shadow evaluation
+- 质量基线持久化与基线驱动 quality gate
+- trend summary / regression alerts
+- release readiness report 与显式 release gate checklist
+- 结构化审计检索与后台看板汇总
 
 本地启动 ingestion worker：
 

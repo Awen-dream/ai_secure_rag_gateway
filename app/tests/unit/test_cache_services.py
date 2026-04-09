@@ -96,6 +96,17 @@ class CacheServicesTest(unittest.TestCase):
         self.assertEqual(len(cached), 1)
         self.assertEqual(cached[0].document.title, "报销制度")
 
+    def test_retrieval_cache_preserves_cached_empty_results(self) -> None:
+        redis_client = RedisClient()
+        cache = RetrievalCache(redis_client=redis_client, ttl_seconds=60)
+        user = build_user()
+
+        cache.set_results(user, "没有命中结果的问题", 5, [])
+        cached = cache.get_results(user, "没有命中结果的问题", 5)
+
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached, [])
+
     def test_rate_limit_service_blocks_after_threshold(self) -> None:
         service = RateLimitService(redis_client=RedisClient(), window_seconds=60, max_requests=2)
 

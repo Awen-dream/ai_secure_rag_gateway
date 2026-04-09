@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from datetime import datetime
 
 from app.application.context.builder import ContextBuilderService
@@ -8,14 +9,24 @@ from app.application.generation.service import GenerationService
 from app.application.prompting.builder import PromptBuilderService
 from app.domain.auth.models import UserContext
 from app.domain.evaluation.models import (
+    EvalBulkAnnotationRequest,
+    EvalBulkAnnotationResult,
     EvalCaseResult,
+    EvalDatasetExport,
+    EvalDatasetImportRequest,
+    EvalDatasetImportResult,
+    EvalDatasetStats,
+    EvalQualityBaseline,
     EvalQualityGate,
     EvalRegressionAlert,
     EvalRunListItem,
     EvalRunResult,
     EvalRunSummary,
+    EvalSampleTemplate,
     EvalTrendSummary,
     EvalSample,
+    ReleaseGateCheck,
+    ReleaseGateReport,
     ReleaseReadinessReport,
     ShadowReportSummary,
     ShadowEvalCaseDiff,
@@ -24,6 +35,7 @@ from app.domain.evaluation.models import (
 from app.domain.retrieval.rerankers import HeuristicReranker
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
+from app.infrastructure.storage.local_eval_baseline_store import LocalEvalBaselineStore
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
 from app.infrastructure.storage.local_eval_run_store import LocalEvalRunStore
 
@@ -38,6 +50,7 @@ class OfflineEvaluationService:
     def __init__(
         self,
         dataset_store: LocalEvalDatasetStore,
+        baseline_store: LocalEvalBaselineStore,
         run_store: LocalEvalRunStore,
         retrieval_service: RetrievalService,
         context_builder: ContextBuilderService,
@@ -45,6 +58,7 @@ class OfflineEvaluationService:
         generation_service: GenerationService,
     ) -> None:
         self.dataset_store = dataset_store
+        self.baseline_store = baseline_store
         self.run_store = run_store
         self.retrieval_service = retrieval_service
         self.context_builder = context_builder
@@ -53,6 +67,144 @@ class OfflineEvaluationService:
 
     def list_samples(self) -> list[EvalSample]:
         return self.dataset_store.list_samples()
+
+    def build_sample_template(self, scene: str = "standard_qa") -> EvalSampleTemplate:
+        """Return one starter sample template and batch example for dataset authoring workflows."""
+
+        template = EvalSample(
+            id="sample_xxx",
+            query="报销审批时限是什么？",
+            scene=scene,
+            expected_doc_ids=["doc_xxx"],
+            expected_titles=["报销制度"],
+            expected_answer_contains=["3个工作日"],
+            expected_intent="standard_qa",
+            labels=["finance", "golden"],
+            reviewed=False,
+            reviewed_by="",
+            notes="补充预期证据与答案关键字后即可纳入离线评测。",
+            metadata={"owner": "qa", "priority": "high"},
+        )
+        return EvalSampleTemplate(
+            scene=scene,
+            sample=template,
+            batch_example=[
+                template,
+                template.model_copy(
+                    update={
+                        "id": "sample_policy_2",
+                        "query": "采购审批流程怎么走？",
+                        "expected_titles": ["采购流程"],
+                        "expected_answer_contains": ["审批流程"],
+                        "labels": ["process"],
+                    }
+                ),
+            ],
+        )
+
+    def get_sample(self, sample_id: str) -> EvalSample | None:
+        return self.dataset_store.get_sample(sample_id)
+
+    def upsert_sample(self, sample: EvalSample) -> EvalSample:
+        return self.dataset_store.upsert_sample(sample)
+
+    def delete_sample(self, sample_id: str) -> bool:
+        return self.dataset_store.delete_sample(sample_id)
+
+    def bulk_annotate(self, payload: EvalBulkAnnotationRequest) -> EvalBulkAnnotationResult:
+        samples = self.dataset_store.list_samples()
+        updated_ids: list[str] = []
+        for sample in samples:
+            if sample.id not in set(payload.sample_ids):
+                continue
+            if payload.labels:
+                if payload.replace_labels:
+                    sample.labels = list(dict.fromkeys(payload.labels))
+                else:
+                    sample.labels = list(dict.fromkeys([*sample.labels, *payload.labels]))
+            if payload.status is not None:
+                sample.status = payload.status
+            if payload.reviewed is not None:
+                sample.reviewed = payload.reviewed
+            if payload.reviewed_by.strip():
+                sample.reviewed_by = payload.reviewed_by.strip()
+            if payload.notes.strip():
+                sample.notes = payload.notes.strip()
+            updated_ids.append(sample.id)
+        self.dataset_store.replace_samples(samples)
+        return EvalBulkAnnotationResult(updated_count=len(updated_ids), updated_ids=updated_ids)
+
+    def import_samples(self, payload: EvalDatasetImportRequest) -> EvalDatasetImportResult:
+        """Import evaluation samples using replace or upsert semantics."""
+
+        mode = payload.mode.strip().lower() or "replace"
+        if mode == "replace":
+            count = self.dataset_store.replace_samples(payload.samples)
+            return EvalDatasetImportResult(mode=mode, sample_count=count, created_count=count, updated_count=0)
+
+        existing = {sample.id: sample for sample in self.dataset_store.list_samples()}
+        created_count = 0
+        updated_count = 0
+        for sample in payload.samples:
+            if sample.id in existing:
+                updated_count += 1
+            else:
+                created_count += 1
+            existing[sample.id] = sample
+        merged = list(existing.values())
+        self.dataset_store.replace_samples(merged)
+        return EvalDatasetImportResult(
+            mode=mode,
+            sample_count=len(merged),
+            created_count=created_count,
+            updated_count=updated_count,
+        )
+
+    def export_samples(self, export_format: str = "json") -> EvalDatasetExport:
+        """Return evaluation samples as JSON payload plus JSONL text for external export."""
+
+        samples = self.dataset_store.list_samples()
+        jsonl = "\n".join(sample.model_dump_json() for sample in samples)
+        if jsonl:
+            jsonl += "\n"
+        return EvalDatasetExport(
+            format=export_format,
+            sample_count=len(samples),
+            samples=samples,
+            jsonl=jsonl,
+        )
+
+    def dataset_stats(self) -> EvalDatasetStats:
+        samples = self.dataset_store.list_samples()
+        if not samples:
+            return EvalDatasetStats()
+        scene_counts = Counter(sample.scene for sample in samples)
+        label_counts = Counter(label for sample in samples for label in sample.labels)
+        status_counts = Counter(sample.status for sample in samples)
+        reviewed = sum(1 for sample in samples if sample.reviewed)
+        active = sum(1 for sample in samples if sample.status == "active")
+        return EvalDatasetStats(
+            total_samples=len(samples),
+            active_samples=active,
+            reviewed_samples=reviewed,
+            coverage_rate=round(reviewed / len(samples), 3),
+            scenes=dict(scene_counts),
+            labels=dict(label_counts),
+            statuses=dict(status_counts),
+        )
+
+    def get_quality_baseline(self) -> EvalQualityBaseline:
+        baseline = self.baseline_store.load()
+        if baseline is None:
+            baseline = EvalQualityBaseline()
+            self.baseline_store.save(baseline)
+        return baseline
+
+    def update_quality_baseline(self, baseline: EvalQualityBaseline) -> EvalQualityBaseline:
+        baseline.updated_at = utcnow()
+        if not baseline.created_at:
+            baseline.created_at = baseline.updated_at
+        return self.baseline_store.save(baseline)
 
     def list_runs(self, limit: int = 20) -> list[EvalRunListItem]:
         return self.run_store.list_runs(limit=limit)
@@ -87,11 +239,15 @@ class OfflineEvaluationService:
         )
 
     def build_release_readiness_report(self) -> ReleaseReadinessReport:
+        baseline = self.get_quality_baseline()
+        dataset_stats = self.dataset_stats()
         latest_offline_payload = self._load_latest_run_payload(mode="offline")
         if latest_offline_payload is None:
             return ReleaseReadinessReport(
                 generated_at=utcnow(),
                 decision="hold",
+                baseline=baseline,
+                dataset_stats=dataset_stats,
                 reasons=["No offline evaluation run is available."],
             )
 
@@ -108,14 +264,21 @@ class OfflineEvaluationService:
             decision = "review"
             reasons.append("Offline evaluation quality gate requires review.")
 
-        if shadow_report.winner == "shadow":
+        if baseline.require_shadow_run and baseline.shadow_must_not_lose and shadow_report.winner == "shadow":
             if decision == "ready":
                 decision = "review"
             reasons.append("Shadow baseline currently outperforms the primary stack.")
-        elif shadow_report.winner == "unavailable":
+        elif baseline.require_shadow_run and shadow_report.winner == "unavailable":
             if decision == "ready":
                 decision = "review"
             reasons.append("No shadow evaluation run is available.")
+
+        if dataset_stats.coverage_rate < baseline.minimum_review_coverage:
+            if decision == "ready":
+                decision = "review"
+            reasons.append(
+                f"Evaluation review coverage {dataset_stats.coverage_rate:.3f} is below minimum {baseline.minimum_review_coverage:.3f}."
+            )
 
         if not reasons:
             reasons.append("Offline evaluation and shadow comparison both meet release expectations.")
@@ -125,10 +288,78 @@ class OfflineEvaluationService:
             decision=decision,
             latest_offline_run_id=latest_offline_run.run_id,
             latest_shadow_run_id=shadow_report.latest_run_id,
+            baseline=baseline,
+            dataset_stats=dataset_stats,
             quality_gate=latest_offline_run.quality_gate,
             trend=trend,
             shadow_report=shadow_report,
             reasons=reasons,
+        )
+
+    def build_release_gate_report(self, allow_review: bool = False) -> ReleaseGateReport:
+        """Build one release gate report with explicit checklist items and pass/fail state."""
+
+        readiness = self.build_release_readiness_report()
+        checks: list[ReleaseGateCheck] = []
+        dataset_stats = readiness.dataset_stats
+        baseline = readiness.baseline
+
+        checks.append(
+            ReleaseGateCheck(
+                name="dataset_presence",
+                status="pass" if dataset_stats.total_samples > 0 else "block",
+                severity="critical" if dataset_stats.total_samples == 0 else "info",
+                detail=f"evaluation samples: {dataset_stats.total_samples}",
+            )
+        )
+        checks.append(
+            ReleaseGateCheck(
+                name="review_coverage",
+                status="pass" if dataset_stats.coverage_rate >= baseline.minimum_review_coverage else "warning",
+                severity="warning",
+                detail=(
+                    f"coverage={dataset_stats.coverage_rate:.3f}, minimum={baseline.minimum_review_coverage:.3f}"
+                ),
+            )
+        )
+        checks.append(
+            ReleaseGateCheck(
+                name="quality_gate",
+                status=readiness.quality_gate.status,
+                severity="critical" if readiness.quality_gate.status == "block" else "warning",
+                detail="; ".join(readiness.quality_gate.reasons) or "quality gate passed",
+            )
+        )
+        checks.append(
+            ReleaseGateCheck(
+                name="shadow_report",
+                status="pass"
+                if not baseline.require_shadow_run
+                or readiness.shadow_report.winner in {"primary", "tie"}
+                else ("warning" if readiness.shadow_report.winner == "unavailable" else "block"),
+                severity="warning",
+                detail=(
+                    f"winner={readiness.shadow_report.winner}, recommendation={readiness.shadow_report.recommendation}"
+                ),
+            )
+        )
+        checks.append(
+            ReleaseGateCheck(
+                name="release_decision",
+                status=readiness.decision,
+                severity="critical" if readiness.decision == "hold" else "warning",
+                detail="; ".join(readiness.reasons),
+            )
+        )
+
+        passed = readiness.decision == "ready" or (allow_review and readiness.decision == "review")
+        return ReleaseGateReport(
+            generated_at=utcnow(),
+            decision=readiness.decision,
+            passed=passed,
+            allow_review=allow_review,
+            checks=checks,
+            release_readiness=readiness,
         )
 
     def build_trend_summary(
@@ -151,8 +382,9 @@ class OfflineEvaluationService:
 
         baseline_summary = self._summary_from_dict(baseline_item.summary) if baseline_item else None
         deltas = self._build_deltas(current_summary, baseline_summary)
-        alerts = self._build_regression_alerts(current_summary, baseline_summary, deltas)
-        quality_gate = self._build_quality_gate(current_summary, alerts)
+        baseline = self.get_quality_baseline()
+        alerts = self._build_regression_alerts(current_summary, baseline_summary, deltas, baseline)
+        quality_gate = self._build_quality_gate(current_summary, alerts, baseline=baseline)
         return EvalTrendSummary(
             current_run_id=current_run_id,
             baseline_run_id=baseline_item.run_id if baseline_item else "",
@@ -166,7 +398,7 @@ class OfflineEvaluationService:
 
     def run(self, limit: int | None = None, persist: bool = True) -> EvalRunResult:
         started_at = utcnow()
-        samples = self.dataset_store.list_samples()
+        samples = [sample for sample in self.dataset_store.list_samples() if sample.status != "archived"]
         if limit is not None:
             samples = samples[:limit]
 
@@ -180,7 +412,7 @@ class OfflineEvaluationService:
             started_at=started_at,
             finished_at=finished_at,
             summary=summary,
-            quality_gate=self._build_quality_gate(summary),
+            quality_gate=self._build_quality_gate(summary, baseline=self.get_quality_baseline()),
             cases=case_results,
         )
         if persist:
@@ -379,6 +611,7 @@ class OfflineEvaluationService:
         current_summary: EvalRunSummary,
         baseline_summary: EvalRunSummary | None,
         deltas: dict,
+        baseline: EvalQualityBaseline,
     ) -> list[EvalRegressionAlert]:
         if baseline_summary is None:
             return []
@@ -391,13 +624,13 @@ class OfflineEvaluationService:
             "answer_valid_rate",
         ):
             delta = float(deltas.get(metric, 0.0))
-            if delta <= -0.05:
+            if delta <= -baseline.regression_warning_drop:
                 current_value = float(getattr(current_summary, metric))
                 baseline_value = float(getattr(baseline_summary, metric))
                 alerts.append(
                     EvalRegressionAlert(
                         metric=metric,
-                        severity="critical" if delta <= -0.1 else "warning",
+                        severity="critical" if delta <= -baseline.regression_block_drop else "warning",
                         direction="down",
                         current_value=current_value,
                         baseline_value=baseline_value,
@@ -408,9 +641,9 @@ class OfflineEvaluationService:
 
         latency_delta = float(deltas.get("average_latency_ms", 0.0))
         if (
-            latency_delta >= 100
+            latency_delta >= baseline.latency_warning_increase_ms
             and baseline_summary.average_latency_ms > 0
-            and current_summary.average_latency_ms >= baseline_summary.average_latency_ms * 1.2
+            and current_summary.average_latency_ms >= baseline_summary.average_latency_ms * baseline.latency_warning_multiplier
         ):
             alerts.append(
                 EvalRegressionAlert(
@@ -432,8 +665,10 @@ class OfflineEvaluationService:
     def _build_quality_gate(
         summary: EvalRunSummary,
         alerts: list[EvalRegressionAlert] | None = None,
+        baseline: EvalQualityBaseline | None = None,
     ) -> EvalQualityGate:
         alerts = alerts or []
+        baseline = baseline or EvalQualityBaseline()
         if summary.total_cases == 0:
             return EvalQualityGate(
                 status="warning",
@@ -446,26 +681,30 @@ class OfflineEvaluationService:
         blocking_metrics: list[str] = []
         evidence_hit_rate = max(summary.retrieval_hit_rate, summary.title_hit_rate)
 
-        if evidence_hit_rate < 0.8:
+        if evidence_hit_rate < baseline.min_evidence_hit_rate:
             status = "block"
             blocking_metrics.append("evidence_hit_rate")
-            reasons.append("Evidence hit rate is below 0.80.")
-        elif evidence_hit_rate < 0.9:
+            reasons.append(f"Evidence hit rate is below {baseline.min_evidence_hit_rate:.2f}.")
+        elif evidence_hit_rate < baseline.target_evidence_hit_rate:
             status = "warning" if status == "pass" else status
-            reasons.append("Evidence hit rate is below the target 0.90.")
+            reasons.append(f"Evidence hit rate is below the target {baseline.target_evidence_hit_rate:.2f}.")
 
-        if summary.answer_valid_rate < 0.95:
+        if summary.answer_valid_rate < baseline.min_answer_valid_rate:
             status = "block"
             blocking_metrics.append("answer_valid_rate")
-            reasons.append("answer_valid_rate is below 0.95.")
+            reasons.append(f"answer_valid_rate is below {baseline.min_answer_valid_rate:.2f}.")
 
-        if summary.answer_match_rate < 0.75:
+        if summary.answer_match_rate < baseline.min_answer_match_rate:
             status = "block"
             blocking_metrics.append("answer_match_rate")
-            reasons.append("answer_match_rate is below 0.75.")
-        elif summary.answer_match_rate < 0.85:
+            reasons.append(f"answer_match_rate is below {baseline.min_answer_match_rate:.2f}.")
+        elif summary.answer_match_rate < baseline.target_answer_match_rate:
             status = "warning" if status == "pass" else status
-            reasons.append("answer_match_rate is below the target 0.85.")
+            reasons.append(f"answer_match_rate is below the target {baseline.target_answer_match_rate:.2f}.")
+
+        if summary.average_latency_ms > baseline.max_latency_ms:
+            status = "warning" if status == "pass" else status
+            reasons.append(f"average_latency_ms exceeds baseline max {baseline.max_latency_ms:.0f} ms.")
 
         if any(alert.severity == "critical" for alert in alerts):
             status = "block"

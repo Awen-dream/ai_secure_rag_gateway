@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from app.application.admin.service import AdminConsoleService
 from app.application.chat.orchestrator import ChatOrchestrator
 from app.application.context.builder import ContextBuilderService
 from app.application.evaluation.service import OfflineEvaluationService
@@ -34,6 +35,7 @@ from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue, DocumentIngestionWorker
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
+from app.infrastructure.storage.local_eval_baseline_store import LocalEvalBaselineStore
 from app.infrastructure.storage.local_eval_run_store import LocalEvalRunStore
 from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
@@ -151,6 +153,13 @@ def get_eval_run_store() -> LocalEvalRunStore:
 
 
 @lru_cache
+def get_eval_baseline_store() -> LocalEvalBaselineStore:
+    """Return the local evaluation quality-baseline store used by release gating."""
+
+    return LocalEvalBaselineStore(settings.eval_baseline_path)
+
+
+@lru_cache
 def get_document_ingestion_orchestrator() -> DocumentIngestionOrchestrator:
     """Return the document ingestion orchestrator used by synchronous and background upload flows."""
 
@@ -246,11 +255,30 @@ def get_offline_evaluation_service() -> OfflineEvaluationService:
 
     return OfflineEvaluationService(
         dataset_store=get_eval_dataset_store(),
+        baseline_store=get_eval_baseline_store(),
         run_store=get_eval_run_store(),
         retrieval_service=get_retrieval_service(),
         context_builder=get_context_builder_service(),
         prompt_builder=get_prompt_builder_service(),
         generation_service=get_generation_service(),
+    )
+
+
+@lru_cache
+def get_admin_console_service() -> AdminConsoleService:
+    """Return the admin console service that aggregates dashboard, document and evaluation management data."""
+
+    return AdminConsoleService(
+        repository=get_repository(),
+        document_service=get_document_service(),
+        audit_service=get_audit_service(),
+        evaluation_service=get_offline_evaluation_service(),
+        eval_dataset_store=get_eval_dataset_store(),
+        prompt_template_service=get_prompt_template_service(),
+        policy_engine=get_policy_engine(),
+        redis_client=get_redis_client(),
+        task_queue=get_document_task_queue(),
+        feishu_source_service=get_feishu_source_sync_service(),
     )
 
 

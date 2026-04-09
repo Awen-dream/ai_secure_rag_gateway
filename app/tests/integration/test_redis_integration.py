@@ -18,6 +18,12 @@ class RedisIntegrationTest(unittest.TestCase):
         os.environ["APP_REDIS_MODE"] = "redis"
         os.environ["APP_REDIS_URL"] = "redis://127.0.0.1:63799/0"
         os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
+        os.environ["APP_ELASTICSEARCH_MODE"] = "local-fallback"
+        os.environ["APP_ELASTICSEARCH_ENDPOINT"] = ""
+        os.environ["APP_ELASTICSEARCH_AUTO_INIT_INDEX"] = "false"
+        os.environ["APP_PGVECTOR_MODE"] = "local-fallback"
+        os.environ["APP_PGVECTOR_DSN"] = ""
+        os.environ["APP_PGVECTOR_AUTO_INIT_SCHEMA"] = "false"
         os.environ["OPENAI_API_KEY"] = ""
 
         from app.core.config import settings
@@ -27,6 +33,12 @@ class RedisIntegrationTest(unittest.TestCase):
         settings.redis_mode = "redis"
         settings.redis_url = "redis://127.0.0.1:63799/0"
         settings.rate_limit_max_requests = 30
+        settings.elasticsearch_mode = "local-fallback"
+        settings.elasticsearch_endpoint = None
+        settings.elasticsearch_auto_init_index = False
+        settings.pgvector_mode = "local-fallback"
+        settings.pgvector_dsn = None
+        settings.pgvector_auto_init_schema = False
         settings.openai_api_key = None
 
         from app.api.deps import (
@@ -46,9 +58,13 @@ class RedisIntegrationTest(unittest.TestCase):
             get_output_guard,
             get_policy_engine,
             get_prompt_template_service,
+            get_query_planning_service,
+            get_query_understanding_service,
             get_rate_limit_service,
+            get_recall_planning_service,
             get_redis_client,
             get_repository,
+            get_retrieval_rerank_service,
             get_retrieval_reranker,
             get_retrieval_cache,
             get_retrieval_service,
@@ -79,6 +95,10 @@ class RedisIntegrationTest(unittest.TestCase):
             get_output_guard,
             get_audit_service,
             get_openai_client,
+            get_query_understanding_service,
+            get_query_planning_service,
+            get_recall_planning_service,
+            get_retrieval_rerank_service,
             get_retrieval_service,
             get_chat_service,
         ):
@@ -98,6 +118,8 @@ class RedisIntegrationTest(unittest.TestCase):
         cls.get_retrieval_cache = staticmethod(get_retrieval_cache)
         cls.get_session_cache = staticmethod(get_session_cache)
         cls.get_document_task_queue = staticmethod(get_document_task_queue)
+        cls.get_query_planning_service = staticmethod(get_query_planning_service)
+        cls.get_recall_planning_service = staticmethod(get_recall_planning_service)
 
     def test_admin_cache_health_and_runtime_cache_keys(self) -> None:
         health = self.client.get(
@@ -140,7 +162,9 @@ class RedisIntegrationTest(unittest.TestCase):
             clearance_level=2,
         )
         session_summary = self.get_session_cache().get_summary(body["session_id"])
-        cached_results = self.get_retrieval_cache().get_results(user, "报销审批时限是什么？", 5)
+        query_plan = self.get_query_planning_service().plan("报销审批时限是什么？")
+        recall_plan = self.get_recall_planning_service().plan(query_plan, top_k=5)
+        cached_results = self.get_retrieval_cache().get_results(user, recall_plan.cache_key, recall_plan.result_limit)
 
         self.assertIsNotNone(session_summary)
         self.assertIn("assistant:", session_summary)

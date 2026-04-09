@@ -35,7 +35,7 @@ class RetrievalCache:
         """Return cached retrieval results when present."""
 
         payload = self.redis_client.get_json(self.build_key(user, rewritten_query, top_k))
-        if not payload:
+        if payload is None:
             return None
         return [RetrievalResult.model_validate(item) for item in payload]
 

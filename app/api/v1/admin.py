@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.application.admin.service import AdminConsoleService
 from app.application.access.service import build_access_filter
 from app.application.context.builder import ContextBuilderService
 from app.application.evaluation.service import OfflineEvaluationService
@@ -13,6 +14,7 @@ from app.application.query.planning import QueryPlanningService
 from app.application.retrieval.planning import RecallPlanningService
 from app.api.deps import (
     get_audit_service,
+    get_admin_console_service,
     get_context_builder_service,
     get_document_task_queue,
     get_offline_evaluation_service,
@@ -31,10 +33,19 @@ from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
 from app.domain.evaluation.models import (
+    EvalBulkAnnotationRequest,
+    EvalBulkAnnotationResult,
+    EvalDatasetExport,
+    EvalDatasetImportRequest,
+    EvalDatasetImportResult,
     EvalRunListItem,
     EvalRunResult,
     EvalSample,
+    EvalSampleTemplate,
+    EvalDatasetStats,
+    EvalQualityBaseline,
     EvalTrendSummary,
+    ReleaseGateReport,
     ReleaseReadinessReport,
     ShadowEvalRunResult,
     ShadowReportSummary,
@@ -85,6 +96,152 @@ def list_evaluation_dataset(
     """List the currently loaded offline evaluation dataset."""
 
     return service.list_samples()
+
+
+@router.get("/evaluation/dataset/template", response_model=EvalSampleTemplate)
+def get_evaluation_sample_template(
+    scene: str = Query("standard_qa"),
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalSampleTemplate:
+    """Return a starter evaluation sample template for dataset authoring."""
+
+    return service.build_sample_template(scene=scene)
+
+
+@router.get("/evaluation/dataset/export", response_model=EvalDatasetExport)
+def export_evaluation_dataset(
+    export_format: str = Query("json"),
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalDatasetExport:
+    """Export the current evaluation dataset as JSON payload plus JSONL text."""
+
+    return service.export_samples(export_format=export_format)
+
+
+@router.get("/evaluation/dataset/stats", response_model=EvalDatasetStats)
+def get_evaluation_dataset_stats(
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalDatasetStats:
+    """Return dataset coverage and labeling stats for evaluation sample governance."""
+
+    return service.dataset_stats()
+
+
+@router.get("/evaluation/dataset/overview")
+def get_evaluation_dataset_overview(
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Return dataset stats plus current baseline snapshot for admin workbench screens."""
+
+    return service.evaluation_dataset_overview()
+
+
+@router.get("/evaluation/dataset/{sample_id}", response_model=EvalSample)
+def get_evaluation_sample(
+    sample_id: str,
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalSample:
+    """Return one evaluation sample for manual review and editing."""
+
+    sample = service.get_sample(sample_id)
+    if sample is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation sample not found.")
+    return sample
+
+
+@router.post("/evaluation/dataset/upsert", response_model=EvalSample)
+def upsert_evaluation_sample(
+    payload: EvalSample,
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalSample:
+    """Create or update one evaluation sample."""
+
+    return service.upsert_sample(payload)
+
+
+@router.post("/evaluation/dataset/import", response_model=EvalDatasetImportResult)
+def import_evaluation_dataset(
+    payload: EvalDatasetImportRequest,
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalDatasetImportResult:
+    """Import evaluation samples using replace or upsert semantics."""
+
+    return service.import_samples(payload)
+
+
+@router.delete("/evaluation/dataset/{sample_id}")
+def delete_evaluation_sample(
+    sample_id: str,
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> dict:
+    """Delete one evaluation sample by id."""
+
+    deleted = service.delete_sample(sample_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation sample not found.")
+    return {"deleted": True, "sample_id": sample_id}
+
+
+@router.post("/evaluation/dataset/bulk-annotate", response_model=EvalBulkAnnotationResult)
+def bulk_annotate_evaluation_samples(
+    payload: EvalBulkAnnotationRequest,
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalBulkAnnotationResult:
+    """Apply one labeling or review update to multiple evaluation samples."""
+
+    return service.bulk_annotate(payload)
+
+
+@router.post("/evaluation/dataset/replace")
+def replace_evaluation_dataset(
+    samples: list[EvalSample],
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Replace the admin evaluation dataset used by offline and shadow evaluation runs."""
+
+    return service.replace_evaluation_dataset(samples)
+
+
+@router.post("/evaluation/dataset/bootstrap")
+def bootstrap_evaluation_dataset(
+    limit: int = Query(20, ge=1, le=200),
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Generate a starter evaluation dataset from the current successful knowledge documents."""
+
+    return service.bootstrap_evaluation_dataset(limit=limit)
+
+
+@router.get("/evaluation/baseline", response_model=EvalQualityBaseline)
+def get_evaluation_baseline(
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalQualityBaseline:
+    """Return the persisted quality baseline used by quality gate and release gate logic."""
+
+    return service.get_quality_baseline()
+
+
+@router.post("/evaluation/baseline", response_model=EvalQualityBaseline)
+def update_evaluation_baseline(
+    payload: EvalQualityBaseline,
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalQualityBaseline:
+    """Persist one quality baseline update for future evaluation and release-gate decisions."""
+
+    return service.update_quality_baseline(payload)
 
 
 @router.post("/evaluation/run", response_model=EvalRunResult)
@@ -153,6 +310,17 @@ def get_release_readiness_report(
     """Return the release-readiness decision based on latest offline and shadow evaluation runs."""
 
     return service.build_release_readiness_report()
+
+
+@router.get("/evaluation/release-gate", response_model=ReleaseGateReport)
+def get_release_gate_report(
+    allow_review: bool = Query(False),
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> ReleaseGateReport:
+    """Return an explicit release-gate checklist and pass/fail result for CI or manual review."""
+
+    return service.build_release_gate_report(allow_review=allow_review)
 
 
 @router.get("/evaluation/shadow-report", response_model=ShadowReportSummary)
@@ -248,10 +416,78 @@ def create_policy(
 
 @router.get("/audit")
 def list_audit_logs(
+    limit: int = Query(100, ge=1, le=500),
+    risk_level: Optional[str] = None,
+    action: Optional[str] = None,
+    scene: Optional[str] = None,
+    query: Optional[str] = None,
     _: UserContext = Depends(require_admin),
     service: AuditService = Depends(get_audit_service),
 ) -> list[dict]:
-    return [log.model_dump() for log in service.list_logs()]
+    logs = service.list_logs()
+    filtered = []
+    normalized_query = (query or "").strip().lower()
+    for log in logs:
+        if risk_level and log.risk_level != risk_level:
+            continue
+        if action and log.action != action:
+            continue
+        if scene and log.scene != scene:
+            continue
+        if normalized_query and normalized_query not in f"{log.query} {log.rewritten_query}".lower():
+            continue
+        filtered.append(log.model_dump())
+        if len(filtered) >= limit:
+            break
+    return filtered
+
+
+@router.get("/dashboard/summary")
+def get_admin_dashboard_summary(
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Return aggregated operations, quality, risk and evaluation summaries for the admin dashboard."""
+
+    return service.build_dashboard_summary()
+
+
+@router.get("/documents")
+def list_admin_documents(
+    tenant_id: Optional[str] = None,
+    status: Optional[str] = None,
+    source_type: Optional[str] = None,
+    search: Optional[str] = None,
+    current_only: bool = Query(False),
+    limit: int = Query(100, ge=1, le=500),
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> list[dict]:
+    """Return admin document inventory with status filters and chunk-count metadata."""
+
+    return service.list_documents(
+        tenant_id=tenant_id,
+        status=status,
+        source_type=source_type,
+        search=search,
+        current_only=current_only,
+        limit=limit,
+    )
+
+
+@router.post("/documents/{doc_id}/retire")
+def retire_admin_document(
+    doc_id: str,
+    reason: str = Query("retired by admin console"),
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Retire one document version for admin remediation and index cleanup workflows."""
+
+    try:
+        return service.retire_document(doc_id, reason=reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.") from exc
 
 
 @router.get("/retrieval/backends", response_model=list[RetrievalBackendInfo])
