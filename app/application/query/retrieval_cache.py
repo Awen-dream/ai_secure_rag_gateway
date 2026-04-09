@@ -10,6 +10,8 @@ from app.infrastructure.cache.redis_client import RedisClient
 class RetrievalCache:
     """Caches permission-scoped retrieval results to reduce repeated backend fan-out."""
 
+    KEY_PREFIX = "retrieval:cache:"
+
     def __init__(self, redis_client: RedisClient, ttl_seconds: int = 300) -> None:
         self.redis_client = redis_client
         self.ttl_seconds = ttl_seconds
@@ -29,7 +31,7 @@ class RetrievalCache:
             ]
         )
         digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
-        return f"retrieval:cache:{digest}"
+        return f"{self.KEY_PREFIX}{digest}"
 
     def get_results(self, user: UserContext, rewritten_query: str, top_k: int) -> list[RetrievalResult] | None:
         """Return cached retrieval results when present."""
@@ -53,3 +55,8 @@ class RetrievalCache:
             [result.model_dump(mode="json") for result in results],
             self.ttl_seconds,
         )
+
+    def invalidate_all(self) -> int:
+        """Drop all cached retrieval results after the document corpus changes."""
+
+        return self.redis_client.delete_prefix(self.KEY_PREFIX)

@@ -167,6 +167,7 @@ def get_document_ingestion_orchestrator() -> DocumentIngestionOrchestrator:
         repository=get_repository(),
         indexing_service=get_indexing_service(),
         source_store=get_document_source_store(),
+        retrieval_cache=get_retrieval_cache(),
     )
 
 

@@ -135,6 +135,21 @@ class RedisClient:
         with self._local_lock:
             return len(self._local_queues.get(key, []))
 
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete all cache entries whose keys begin with the provided prefix."""
+
+        if self.can_execute():
+            keys = list(self._client.scan_iter(match=f"{prefix}*"))
+            if not keys:
+                return 0
+            return int(self._client.delete(*keys))
+
+        with self._local_lock:
+            keys_to_delete = [key for key in self._local_store if key.startswith(prefix)]
+            for key in keys_to_delete:
+                self._local_store.pop(key, None)
+            return len(keys_to_delete)
+
     def _get_value(self, key: str) -> Optional[str]:
         if self.can_execute():
             return self._client.get(key)

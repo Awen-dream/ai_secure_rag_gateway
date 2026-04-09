@@ -5,6 +5,7 @@ from datetime import datetime
 
 from app.application.ingestion.document_parser import extract_text_from_bytes
 from app.application.ingestion.pipelines import chunk_document
+from app.application.query.retrieval_cache import RetrievalCache
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.infrastructure.db.repositories.base import MetadataRepository
@@ -23,10 +24,12 @@ class DocumentIngestionOrchestrator:
         repository: MetadataRepository,
         indexing_service: RetrievalIndexingService,
         source_store: LocalDocumentSourceStore,
+        retrieval_cache: RetrievalCache | None = None,
     ) -> None:
         self.repository = repository
         self.indexing_service = indexing_service
         self.source_store = source_store
+        self.retrieval_cache = retrieval_cache
 
     def process_document(self, doc_id: str) -> DocumentRecord:
         """Advance one document through parsing, chunking, embedding and indexing."""
@@ -74,6 +77,8 @@ class DocumentIngestionOrchestrator:
             document.updated_at = utcnow()
             self.repository.save_document(document, chunks, previous_ids)
             self.indexing_service.upsert_document(document, chunks)
+            if self.retrieval_cache:
+                self.retrieval_cache.invalidate_all()
             return document
         except Exception as exc:
             document.status = DocumentStatus.FAILED
