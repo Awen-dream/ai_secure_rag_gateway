@@ -1,25 +1,19 @@
 from __future__ import annotations
 
-from datetime import datetime
-
+from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.retrieval.planning import RecallFilterPlan, RecallPlan, RecallPlanningService
 from app.application.query.planning import QueryPlanningResult, QueryPlanningService
 from app.application.query.retrieval_cache import RetrievalCache
-from app.application.query.rewrite import QueryRewritePlan
 from app.domain.auth.filter_builder import build_access_filter
 from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
-from app.domain.retrieval.backends import BackendSearchHit, KeywordSearchBackend, VectorSearchBackend
-from app.domain.retrieval.models import (
-    RetrievalBackendInfo,
-    RetrievalExplainResponse,
-    RetrievalResult,
-)
-from app.domain.retrieval.rerankers import HeuristicReranker, sort_by_score, weighted_fusion
+from app.domain.retrieval.backends import KeywordSearchBackend, VectorSearchBackend
+from app.domain.retrieval.models import RetrievalBackendInfo, RetrievalExplainResponse, RetrievalResult
+from app.domain.retrieval.rerankers import HeuristicReranker, sort_by_score
 
 
 class RetrievalService:
-    """Coordinates hybrid retrieval across explicit keyword and vector backends."""
+    """Coordinates planning, backend execution, and rerank-layer selection for hybrid retrieval."""
 
     def __init__(
         self,
@@ -30,14 +24,15 @@ class RetrievalService:
         reranker: HeuristicReranker | None = None,
         query_planning: QueryPlanningService | None = None,
         recall_planning: RecallPlanningService | None = None,
+        rerank_service: RetrievalRerankService | None = None,
     ) -> None:
         self.document_service = document_service
         self.keyword_backend = keyword_backend
         self.vector_backend = vector_backend
         self.retrieval_cache = retrieval_cache
-        self.reranker = reranker
         self.query_planning = query_planning or QueryPlanningService()
         self.recall_planning = recall_planning or RecallPlanningService()
+        self.rerank_service = rerank_service or RetrievalRerankService(reranker)
 
     def retrieve(
         self,
@@ -72,8 +67,6 @@ class RetrievalService:
         recall_plan = self.recall_planning.plan(query_plan, top_k=top_k)
         understanding = query_plan.understanding
         rewrite_plan = query_plan.rewrite_plan
-        rewritten = rewrite_plan.rewritten_query
-        profile = recall_plan.profile
         cached_results = None
         if self.retrieval_cache:
             cached_results = self.retrieval_cache.get_results(user, recall_plan.cache_key, recall_plan.result_limit)
@@ -84,7 +77,7 @@ class RetrievalService:
             if self.retrieval_cache:
                 self.retrieval_cache.set_results(user, recall_plan.cache_key, recall_plan.result_limit, results)
         return RetrievalExplainResponse(
-            rewritten_query=rewritten,
+            rewritten_query=rewrite_plan.rewritten_query,
             intent=understanding.intent,
             intent_confidence=understanding.confidence,
             intent_reasons=understanding.reasons,
@@ -98,7 +91,7 @@ class RetrievalService:
             tag_filters=rewrite_plan.tag_filters,
             year_filters=rewrite_plan.year_filters,
             recency_hint=rewrite_plan.recency_hint,
-            profile=profile,
+            profile=recall_plan.profile,
             results=sort_by_score(results)[: recall_plan.result_limit],
         )
 
@@ -124,10 +117,9 @@ class RetrievalService:
         user: UserContext,
         recall_plan: RecallPlan,
     ) -> list[RetrievalResult]:
-        """Fuse Elasticsearch-style keyword hits and PGVector-style semantic hits."""
+        """Execute backend retrieval and delegate candidate building/rerank to the rerank layer."""
 
         access_filter = build_access_filter(user)
-        rewrite_plan = recall_plan.query_plan.rewrite_plan
         candidates = self._apply_query_filters(self.document_service.get_accessible_chunks(user), recall_plan.filters)
         if not candidates:
             return []
@@ -144,95 +136,8 @@ class RetrievalService:
             top_k=recall_plan.candidate_pool,
             access_filter=access_filter,
         )
-        ranked_candidates = sort_by_score(self._merge_backend_hits(keyword_hits, vector_hits, recall_plan))
-        if not ranked_candidates:
-            return []
-
-        top_score = ranked_candidates[0].score
-        filtered_candidates = [
-            item
-            for item in ranked_candidates
-            if item.score >= recall_plan.profile.min_score
-            and item.score >= top_score * recall_plan.profile.relative_score_cutoff
-        ]
-        if self.reranker:
-            filtered_candidates = self.reranker.rerank(rewrite_plan.rewritten_query, filtered_candidates)
-        return filtered_candidates[: recall_plan.candidate_pool]
-
-    @staticmethod
-    def _merge_backend_hits(
-        keyword_hits: list[BackendSearchHit],
-        vector_hits: list[BackendSearchHit],
-        recall_plan: RecallPlan,
-    ) -> list[RetrievalResult]:
-        """Normalize backend scores and fuse them into a single candidate set."""
-
-        profile = recall_plan.profile
-        rewrite_plan = recall_plan.query_plan.rewrite_plan
-        merged: dict[str, RetrievalResult] = {}
-        max_keyword = max((hit.score for hit in keyword_hits), default=0.0)
-        max_vector = max((hit.score for hit in vector_hits), default=0.0)
-        keyword_rank = {hit.chunk.id: index + 1 for index, hit in enumerate(sorted(keyword_hits, key=lambda item: item.score, reverse=True))}
-        vector_rank = {hit.chunk.id: index + 1 for index, hit in enumerate(sorted(vector_hits, key=lambda item: item.score, reverse=True))}
-
-        for hit in keyword_hits:
-            merged[hit.chunk.id] = RetrievalResult(
-                document=hit.document,
-                chunk=hit.chunk,
-                score=0.0,
-                keyword_score=hit.score,
-                vector_score=0.0,
-                matched_terms=hit.matched_terms,
-                retrieval_sources=[hit.backend],
-            )
-
-        for hit in vector_hits:
-            if hit.chunk.id not in merged:
-                merged[hit.chunk.id] = RetrievalResult(
-                    document=hit.document,
-                    chunk=hit.chunk,
-                    score=0.0,
-                    keyword_score=0.0,
-                    vector_score=hit.score,
-                    matched_terms=[],
-                    retrieval_sources=[hit.backend],
-                )
-                continue
-
-            existing = merged[hit.chunk.id]
-            existing.vector_score = hit.score
-            if hit.backend not in existing.retrieval_sources:
-                existing.retrieval_sources.append(hit.backend)
-
-        normalized_results: list[RetrievalResult] = []
-        for result in merged.values():
-            keyword_normalized = result.keyword_score / max_keyword if max_keyword else 0.0
-            vector_normalized = result.vector_score / max_vector if max_vector else 0.0
-            title_boost = (
-                profile.title_boost
-                if any(term in result.document.title.lower() for term in rewrite_plan.expanded_terms or rewrite_plan.keywords)
-                else 0.0
-            )
-            phrase_boost = sum(0.04 for phrase in rewrite_plan.exact_phrases[:2] if phrase.lower() in result.chunk.text.lower())
-            tag_boost = 0.05 if rewrite_plan.tag_filters and any(tag.lower() in result.document.tags for tag in rewrite_plan.tag_filters) else 0.0
-            recency_boost = RetrievalService._recency_boost(result.document.updated_at, rewrite_plan.recency_hint)
-            rank_fusion = RetrievalService._reciprocal_rank_fusion(
-                keyword_rank.get(result.chunk.id),
-                vector_rank.get(result.chunk.id),
-                profile,
-            )
-            result.score = weighted_fusion(
-                keyword_score=keyword_normalized,
-                vector_score=vector_normalized,
-                keyword_weight=profile.keyword_weight,
-                vector_weight=profile.vector_weight,
-                title_boost=title_boost,
-            )
-            result.score = round(result.score + phrase_boost + tag_boost + recency_boost + rank_fusion, 4)
-            result.keyword_score = round(keyword_normalized, 4)
-            result.vector_score = round(vector_normalized, 4)
-            normalized_results.append(result)
-        return normalized_results
+        rerank_candidates = self.rerank_service.build_rerank_candidates(keyword_hits, vector_hits, recall_plan)
+        return self.rerank_service.rerank_results(rerank_candidates, recall_plan)
 
     @staticmethod
     def _apply_query_filters(
@@ -253,30 +158,3 @@ class RetrievalService:
                 if item[0].updated_at.year in filters.year_filters or item[0].created_at.year in filters.year_filters
             ]
         return filtered
-
-    @staticmethod
-    def _reciprocal_rank_fusion(
-        keyword_rank: int | None,
-        vector_rank: int | None,
-        profile: RetrievalProfile,
-        k: int = 60,
-    ) -> float:
-        score = 0.0
-        if keyword_rank is not None:
-            score += (1.0 / (k + keyword_rank)) * (0.45 + profile.keyword_weight)
-        if vector_rank is not None:
-            score += (1.0 / (k + vector_rank)) * (0.45 + profile.vector_weight)
-        return round(score, 4)
-
-    @staticmethod
-    def _recency_boost(updated_at: datetime, recency_hint: bool) -> float:
-        if not recency_hint:
-            return 0.0
-        age_days = max((datetime.utcnow() - updated_at).days, 0)
-        if age_days <= 30:
-            return 0.06
-        if age_days <= 180:
-            return 0.03
-        if age_days <= 365:
-            return 0.015
-        return 0.0

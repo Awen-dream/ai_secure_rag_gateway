@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from app.application.conversation.memory import ConversationManager
+from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.application.retrieval.planning import RecallPlanningService
 from app.application.query.planning import QueryPlanningService
@@ -230,7 +231,7 @@ def get_embedding_client() -> OpenAIEmbeddingClient:
 
 @lru_cache
 def get_retrieval_reranker() -> HeuristicReranker:
-    """Return the active reranker used after first-pass hybrid retrieval fusion."""
+    """Return the low-level scoring reranker used inside the retrieval rerank layer."""
 
     return HeuristicReranker(mode=settings.reranker_mode, top_n=settings.reranker_top_n)
 
@@ -257,6 +258,13 @@ def get_recall_planning_service() -> RecallPlanningService:
 
 
 @lru_cache
+def get_retrieval_rerank_service() -> RetrievalRerankService:
+    """Return the rerank-layer service used after multi-backend retrieval execution."""
+
+    return RetrievalRerankService(get_retrieval_reranker())
+
+
+@lru_cache
 def get_retrieval_service() -> RetrievalService:
     """Return the hybrid retrieval service backed by Elasticsearch and PGVector adapters."""
 
@@ -268,6 +276,7 @@ def get_retrieval_service() -> RetrievalService:
         reranker=get_retrieval_reranker(),
         query_planning=get_query_planning_service(),
         recall_planning=get_recall_planning_service(),
+        rerank_service=get_retrieval_rerank_service(),
     )
 
 
