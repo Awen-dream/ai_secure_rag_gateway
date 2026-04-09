@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections import defaultdict
 from datetime import datetime
 
@@ -7,6 +8,12 @@ from app.application.retrieval.planning import RecallPlan
 from app.domain.retrieval.backends import BackendSearchHit
 from app.domain.retrieval.models import RetrievalProfile, RetrievalResult
 from app.domain.retrieval.rerankers import RetrievalReranker, sort_by_score, weighted_fusion
+
+
+@dataclass(frozen=True)
+class RerankExecutionResult:
+    pre_rerank_results: list[RetrievalResult]
+    results: list[RetrievalResult]
 
 
 class RetrievalRerankService:
@@ -121,28 +128,82 @@ class RetrievalRerankService:
         return sort_by_score(normalized_results)
 
     def rerank_results(self, results: list[RetrievalResult], recall_plan: RecallPlan) -> list[RetrievalResult]:
+        return self.execute_rerank(results, recall_plan).results
+
+    def execute_rerank(self, results: list[RetrievalResult], recall_plan: RecallPlan) -> RerankExecutionResult:
         if not results:
-            return []
+            return RerankExecutionResult(pre_rerank_results=[], results=[])
+
+        sorted_results = sort_by_score(results)
+        trace_by_chunk_id = {item.chunk.id: item.model_copy(deep=True) for item in sorted_results}
+        for trace in trace_by_chunk_id.values():
+            trace.selection_status = "candidate"
 
         rewrite_plan = recall_plan.query_plan.rewrite_plan
-        top_score = results[0].score
+        top_score = sorted_results[0].score
         filtered_candidates = [
             item
-            for item in results
+            for item in sorted_results
             if item.score >= recall_plan.profile.min_score
             and item.score >= top_score * recall_plan.profile.relative_score_cutoff
         ]
+        filtered_ids = {item.chunk.id for item in filtered_candidates}
+        for item in sorted_results:
+            trace = trace_by_chunk_id[item.chunk.id]
+            reasons: list[str] = []
+            if item.score < recall_plan.profile.min_score:
+                reasons.append("below_min_score")
+            if item.score < top_score * recall_plan.profile.relative_score_cutoff:
+                reasons.append("below_relative_score_cutoff")
+            if reasons:
+                trace.selection_status = "dropped"
+                trace.selection_reasons = reasons
+            else:
+                trace.selection_status = "passed_threshold"
         if self.reranker:
             filtered_candidates = self.reranker.rerank(rewrite_plan.rewritten_query, filtered_candidates)
-        return self._apply_document_diversity(filtered_candidates, recall_plan.max_chunks_per_document)[: recall_plan.candidate_pool]
+        reranked_ids = {item.chunk.id for item in filtered_candidates}
+        for chunk_id in filtered_ids - reranked_ids:
+            trace = trace_by_chunk_id[chunk_id]
+            trace.selection_status = "dropped"
+            trace.selection_reasons = list(dict.fromkeys([*trace.selection_reasons, "dropped_by_reranker"]))
+
+        diversity_ordered, diversity_overflow_ids = self._apply_document_diversity(
+            filtered_candidates,
+            recall_plan.max_chunks_per_document,
+        )
+        for chunk_id in diversity_overflow_ids:
+            trace = trace_by_chunk_id[chunk_id]
+            trace.selection_reasons = list(dict.fromkeys([*trace.selection_reasons, "deprioritized_by_doc_diversity"]))
+
+        final_results = diversity_ordered[: recall_plan.candidate_pool]
+        final_ids = {item.chunk.id for item in final_results}
+        for item in final_results:
+            trace = trace_by_chunk_id[item.chunk.id]
+            trace.selection_status = "selected"
+            trace.selection_reasons = list(dict.fromkeys([*trace.selection_reasons, "selected_after_rerank"]))
+            item.selection_status = trace.selection_status
+            item.selection_reasons = list(trace.selection_reasons)
+        for chunk_id in reranked_ids - final_ids:
+            trace = trace_by_chunk_id[chunk_id]
+            trace.selection_status = "dropped"
+            trace.selection_reasons = list(dict.fromkeys([*trace.selection_reasons, "pruned_by_candidate_pool"]))
+        return RerankExecutionResult(
+            pre_rerank_results=[trace_by_chunk_id[item.chunk.id] for item in sorted_results],
+            results=final_results,
+        )
 
     @staticmethod
-    def _apply_document_diversity(results: list[RetrievalResult], max_chunks_per_document: int) -> list[RetrievalResult]:
+    def _apply_document_diversity(
+        results: list[RetrievalResult],
+        max_chunks_per_document: int,
+    ) -> tuple[list[RetrievalResult], set[str]]:
         if max_chunks_per_document <= 0:
-            return results
+            return results, set()
 
         kept: list[RetrievalResult] = []
         overflow: list[RetrievalResult] = []
+        overflow_ids: set[str] = set()
         doc_counts: dict[str, int] = defaultdict(int)
         for result in results:
             if doc_counts[result.document.id] < max_chunks_per_document:
@@ -150,7 +211,8 @@ class RetrievalRerankService:
                 doc_counts[result.document.id] += 1
             else:
                 overflow.append(result)
-        return kept + overflow
+                overflow_ids.add(result.chunk.id)
+        return kept + overflow, overflow_ids
 
     @staticmethod
     def _reciprocal_rank_fusion(

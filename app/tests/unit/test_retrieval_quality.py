@@ -153,11 +153,13 @@ class RetrievalQualityTest(unittest.TestCase):
         explanation = service.explain(user, "请问 2025年 #finance 最新报销审批时限是多少？", top_k=5)
 
         self.assertEqual(len(explanation.results), 1)
+        self.assertGreaterEqual(len(explanation.pre_rerank_results), 1)
         self.assertEqual(explanation.results[0].document.id, "doc_finance")
         self.assertIn("费用报销", explanation.expanded_terms)
         self.assertEqual(explanation.tag_filters, ["finance"])
         self.assertEqual(explanation.year_filters, [2025])
         self.assertEqual(explanation.rerank_sources, [])
+        self.assertEqual(explanation.drop_reasons, [])
         self.assertIn("审批时限", keyword_backend.last_terms)
         self.assertEqual(keyword_backend.last_tag_filters, ["finance"])
         self.assertEqual(keyword_backend.last_year_filters, [2025])
@@ -210,6 +212,8 @@ class RetrievalQualityTest(unittest.TestCase):
         self.assertEqual(explanation.rewritten_query, "报销制度审批时限")
         self.assertEqual(explanation.understanding_source, "rule")
         self.assertGreaterEqual(len(explanation.results), 1)
+        self.assertGreaterEqual(len(explanation.pre_rerank_results), 1)
+        self.assertEqual(explanation.results[0].selection_status, "selected")
 
 
 if __name__ == "__main__":

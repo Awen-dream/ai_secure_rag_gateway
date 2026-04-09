@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 
@@ -10,12 +11,14 @@ from app.infrastructure.llm.openai_client import OpenAIClient
 
 _RANK_ID_RE = re.compile(r"R(\d+)")
 _RANK_REASON_RE = re.compile(r"R(\d+)(?:\s*[:|\-]\s*(.+))?$", re.IGNORECASE)
+_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 @dataclass(frozen=True)
 class LLMRerankDecision:
     order: list[int] = field(default_factory=list)
     reasons: dict[int, str] = field(default_factory=dict)
+    scores: dict[int, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,8 @@ class LLMReranker(RetrievalReranker):
         reranked_window: list[RetrievalResult] = []
         for position, item in enumerate(selected):
             copy = item.model_copy(deep=True)
-            copy.score = round(top_score + 0.2 - (position * 0.01), 4)
+            llm_score = decision.scores.get(decision.order[position], max(0.2, 1.0 - (position * 0.05)))
+            copy.score = round(top_score + (llm_score * 0.2) - (position * 0.005), 4)
             copy.rerank_source = "llm"
             reason = decision.reasons.get(decision.order[position], "").strip()
             if reason:
@@ -66,8 +70,9 @@ class LLMReranker(RetrievalReranker):
         instructions = (
             "You are reranking enterprise retrieval candidates. "
             "Prefer candidates that directly answer the query, preserve exact policy wording, and have stronger citation usefulness. "
-            "Return one candidate per line in best-first order using the format R1 | short_reason. "
-            "Keep each reason under 12 words and do not add any prose outside the ranked lines."
+            "Return valid JSON only with the shape "
+            '{"ranked_candidates":[{"candidate_id":"R1","score":0.98,"reason":"direct answer"}]}. '
+            "Keep score between 0 and 1. Keep each reason under 12 words."
         )
         lines = [f"Query: {query}", "Candidates:"]
         for index, result in enumerate(results, start=1):
@@ -81,6 +86,10 @@ class LLMReranker(RetrievalReranker):
 
     @staticmethod
     def _parse_decision(response: str, limit: int) -> LLMRerankDecision:
+        json_decision = LLMReranker._parse_json_decision(response, limit)
+        if json_decision.order:
+            return json_decision
+
         order: list[int] = []
         reasons: dict[int, str] = {}
         for line in response.splitlines():
@@ -102,3 +111,42 @@ class LLMReranker(RetrievalReranker):
                 if 0 <= index < limit and index not in order:
                     order.append(index)
         return LLMRerankDecision(order=order, reasons=reasons)
+
+    @staticmethod
+    def _parse_json_decision(response: str, limit: int) -> LLMRerankDecision:
+        stripped = response.strip()
+        fenced = _JSON_BLOCK_RE.search(stripped)
+        payload_text = fenced.group(1) if fenced else stripped
+        try:
+            payload = json.loads(payload_text)
+        except Exception:
+            return LLMRerankDecision()
+        if not isinstance(payload, dict):
+            return LLMRerankDecision()
+        ranked_candidates = payload.get("ranked_candidates")
+        if not isinstance(ranked_candidates, list):
+            return LLMRerankDecision()
+
+        order: list[int] = []
+        reasons: dict[int, str] = {}
+        scores: dict[int, float] = {}
+        for item in ranked_candidates:
+            if not isinstance(item, dict):
+                continue
+            candidate_id = str(item.get("candidate_id", "")).strip().upper()
+            match = _RANK_ID_RE.fullmatch(candidate_id)
+            if not match:
+                continue
+            index = int(match.group(1)) - 1
+            if not (0 <= index < limit) or index in order:
+                continue
+            order.append(index)
+            reason = str(item.get("reason", "")).strip()
+            if reason:
+                reasons[index] = reason
+            try:
+                score = float(item.get("score", 0.0))
+            except Exception:
+                score = 0.0
+            scores[index] = max(0.0, min(score, 1.0))
+        return LLMRerankDecision(order=order, reasons=reasons, scores=scores)

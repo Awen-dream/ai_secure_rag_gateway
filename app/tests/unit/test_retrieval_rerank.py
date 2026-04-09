@@ -8,6 +8,7 @@ from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.retrieval.planning import RecallPlanningService
 from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
 from app.domain.retrieval.backends import BackendSearchHit
+from app.domain.retrieval.rerankers import RetrievalReranker
 
 
 def _build_document(doc_id, title, tags, year):
@@ -93,13 +94,16 @@ class RetrievalRerankServiceTest(unittest.TestCase):
 
         service = RetrievalRerankService()
         rerank_candidates = service.build_rerank_candidates(keyword_hits, vector_hits, recall_plan)
-        selected = service.rerank_results(rerank_candidates, recall_plan)
+        execution = service.execute_rerank(rerank_candidates, recall_plan)
+        selected = execution.results
 
         self.assertEqual(len(rerank_candidates), 1)
+        self.assertEqual(len(execution.pre_rerank_results), 1)
         self.assertEqual(len(selected), 1)
         self.assertIn("elasticsearch", selected[0].retrieval_sources)
         self.assertIn("pgvector", selected[0].retrieval_sources)
         self.assertGreater(selected[0].score, 0)
+        self.assertEqual(selected[0].selection_status, "selected")
 
     def test_rerank_limits_duplicate_chunks_from_same_document(self) -> None:
         understanding = QueryUnderstandingResult(
@@ -137,6 +141,57 @@ class RetrievalRerankServiceTest(unittest.TestCase):
 
         self.assertEqual(selected[0].document.id, "doc_1")
         self.assertEqual(selected[1].document.id, "doc_2")
+
+    def test_execute_rerank_marks_drop_reasons(self) -> None:
+        class _DropSecondReranker(RetrievalReranker):
+            def rerank(self, query, results):
+                return results[:1]
+
+        understanding = QueryUnderstandingResult(
+            rewritten_query="报销制度审批时限",
+            intent="standard_qa",
+            confidence=0.9,
+            reasons=["precomputed"],
+            source="rule",
+            rule_rewritten_query="报销制度审批时限",
+            rule_intent="standard_qa",
+            rule_confidence=0.9,
+            rule_reasons=["precomputed"],
+        )
+        recall_plan = RecallPlanningService().plan(
+            QueryPlanningResult(
+                understanding=understanding,
+                rewrite_plan=refine_query_rewrite_plan(
+                    build_query_rewrite_plan("报销制度审批时限"),
+                    understanding.rewritten_query,
+                ),
+            )
+        )
+        doc_one = _build_document("doc_1", "报销制度", ["finance"], 2025)
+        doc_two = _build_document("doc_2", "采购制度", ["finance"], 2025)
+        candidates = [
+            BackendSearchHit(
+                document=doc_one,
+                chunk=_build_chunk("doc_1", "chunk_1", "报销审批时限为3个工作日。"),
+                score=8.0,
+                backend="elasticsearch",
+                matched_terms=["审批时限"],
+            ),
+            BackendSearchHit(
+                document=doc_two,
+                chunk=_build_chunk("doc_2", "chunk_2", "采购审批时限为5个工作日。"),
+                score=7.0,
+                backend="elasticsearch",
+                matched_terms=["审批时限"],
+            ),
+        ]
+
+        service = RetrievalRerankService(reranker=_DropSecondReranker())
+        execution = service.execute_rerank(service.build_rerank_candidates(candidates, [], recall_plan), recall_plan)
+
+        dropped = [item for item in execution.pre_rerank_results if item.selection_status == "dropped"]
+        self.assertEqual(len(dropped), 1)
+        self.assertIn("dropped_by_reranker", dropped[0].selection_reasons)
 
 
 if __name__ == "__main__":

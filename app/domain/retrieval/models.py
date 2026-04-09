@@ -26,6 +26,8 @@ class RetrievalResult(BaseModel):
     retrieval_sources: List[str] = Field(default_factory=list)
     rerank_source: str = ""
     rerank_notes: List[str] = Field(default_factory=list)
+    selection_status: str = ""
+    selection_reasons: List[str] = Field(default_factory=list)
 
 
 class RetrievalBackendInfo(BaseModel):
@@ -63,7 +65,9 @@ class RetrievalExplainResponse(BaseModel):
     recency_hint: bool = False
     rerank_sources: List[str] = Field(default_factory=list)
     rerank_notes: List[str] = Field(default_factory=list)
+    drop_reasons: List[str] = Field(default_factory=list)
     profile: RetrievalProfile
+    pre_rerank_results: List[RetrievalResult] = Field(default_factory=list)
     results: List[RetrievalResult] = Field(default_factory=list)
 
 

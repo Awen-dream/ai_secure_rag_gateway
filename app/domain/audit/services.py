@@ -66,6 +66,8 @@ class AuditService:
                         "retrieval_sources": result.retrieval_sources,
                         "rerank_source": result.rerank_source,
                         "rerank_notes": result.rerank_notes,
+                        "selection_status": result.selection_status,
+                        "selection_reasons": result.selection_reasons,
                         "security_level": result.chunk.security_level,
                     }
                     for result in retrieved

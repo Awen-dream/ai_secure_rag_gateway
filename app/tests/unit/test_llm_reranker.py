@@ -79,7 +79,11 @@ class LLMRerankerTest(unittest.TestCase):
             ),
         ]
 
-        with patch.object(OpenAIClient, "generate_response", return_value="R2 | direct answer\nR1 | supporting policy"):
+        with patch.object(
+            OpenAIClient,
+            "generate_response",
+            return_value='{"ranked_candidates":[{"candidate_id":"R2","score":0.96,"reason":"direct answer"},{"candidate_id":"R1","score":0.72,"reason":"supporting policy"}]}',
+        ):
             reranked = reranker.rerank("审批时限是什么？", results)
 
         self.assertEqual(reranked[0].document.id, "doc_2")

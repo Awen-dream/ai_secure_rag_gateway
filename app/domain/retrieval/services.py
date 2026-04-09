@@ -72,8 +72,9 @@ class RetrievalService:
             cached_results = self.retrieval_cache.get_results(user, recall_plan.cache_key, recall_plan.result_limit)
         if cached_results is not None:
             results = cached_results
+            pre_rerank_results = []
         else:
-            results = self._hybrid_retrieve(user, recall_plan)
+            pre_rerank_results, results = self._hybrid_retrieve(user, recall_plan)
             if self.retrieval_cache:
                 self.retrieval_cache.set_results(user, recall_plan.cache_key, recall_plan.result_limit, results)
         return RetrievalExplainResponse(
@@ -95,7 +96,16 @@ class RetrievalService:
             rerank_notes=list(
                 dict.fromkeys(note for result in results for note in result.rerank_notes if note)
             )[:5],
+            drop_reasons=list(
+                dict.fromkeys(
+                    reason
+                    for result in pre_rerank_results
+                    if result.selection_status == "dropped"
+                    for reason in result.selection_reasons
+                )
+            )[:8],
             profile=recall_plan.profile,
+            pre_rerank_results=sort_by_score(pre_rerank_results)[: min(recall_plan.candidate_pool, 10)],
             results=sort_by_score(results)[: recall_plan.result_limit],
         )
 
@@ -120,13 +130,13 @@ class RetrievalService:
         self,
         user: UserContext,
         recall_plan: RecallPlan,
-    ) -> list[RetrievalResult]:
+    ) -> tuple[list[RetrievalResult], list[RetrievalResult]]:
         """Execute backend retrieval and delegate candidate building/rerank to the rerank layer."""
 
         access_filter = build_access_filter(user)
         candidates = self._apply_query_filters(self.document_service.get_accessible_chunks(user), recall_plan.filters)
         if not candidates:
-            return []
+            return [], []
         keyword_hits = self.keyword_backend.search(
             query=recall_plan.keyword_query,
             terms=recall_plan.keyword_terms,
@@ -146,7 +156,8 @@ class RetrievalService:
             year_filters=recall_plan.filters.year_filters,
         )
         rerank_candidates = self.rerank_service.build_rerank_candidates(keyword_hits, vector_hits, recall_plan)
-        return self.rerank_service.rerank_results(rerank_candidates, recall_plan)
+        rerank_execution = self.rerank_service.execute_rerank(rerank_candidates, recall_plan)
+        return rerank_execution.pre_rerank_results, rerank_execution.results
 
     @staticmethod
     def _apply_query_filters(
