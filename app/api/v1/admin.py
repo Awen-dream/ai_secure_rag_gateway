@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.application.context.builder import ContextBuilderService
+from app.application.prompting.builder import PromptBuilderService
 from app.api.deps import (
     get_audit_service,
     get_context_builder_service,
@@ -12,6 +13,7 @@ from app.api.deps import (
     get_feishu_source_sync_service,
     get_keyword_backend,
     get_policy_engine,
+    get_prompt_builder_service,
     get_prompt_service,
     get_redis_client,
     get_retrieval_service,
@@ -96,7 +98,7 @@ def set_prompt_template_enabled(
 def preview_prompt_template(
     payload: PromptPreviewRequest,
     user: UserContext = Depends(require_admin),
-    prompt_service: PromptService = Depends(get_prompt_service),
+    prompt_builder: PromptBuilderService = Depends(get_prompt_builder_service),
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
     context_builder: ContextBuilderService = Depends(get_context_builder_service),
 ) -> PromptPreviewResponse:
@@ -104,7 +106,7 @@ def preview_prompt_template(
 
     retrieved = retrieval_service.retrieve(user, payload.query, top_k=payload.top_k)
     assembled_context = context_builder.build(retrieved)
-    return prompt_service.preview_chat_prompt(
+    return prompt_builder.preview_chat_prompt(
         scene=payload.scene,
         query=payload.query,
         assembled_context=assembled_context,

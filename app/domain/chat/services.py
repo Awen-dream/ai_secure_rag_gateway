@@ -8,17 +8,16 @@ from app.application.context.builder import ContextBuilderService
 from app.application.conversation.memory import ConversationManager, build_permission_signature
 from app.application.conversation.summarizer import summarize_long_history, summarize_recent_messages
 from app.application.conversation.session_cache import SessionCache
+from app.application.generation.service import GenerationService
+from app.application.prompting.builder import PromptBuilderService
 from app.domain.audit.services import AuditService
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession, SessionStatus
 from app.domain.chat.schemas import ChatQueryRequest, ChatQueryResponse
-from app.domain.prompts.services import PromptService
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.models import RiskAction
-from app.domain.risk.output_guard import OutputGuard
 from app.domain.risk.services import PolicyEngine
 from app.infrastructure.db.repositories.base import MetadataRepository
-from app.infrastructure.llm.openai_client import OpenAIClient
 
 
 def utcnow() -> datetime:
@@ -30,22 +29,20 @@ class ChatService:
         self,
         repository: MetadataRepository,
         retrieval_service: RetrievalService,
-        prompt_service: PromptService,
         policy_engine: PolicyEngine,
-        output_guard: OutputGuard,
         audit_service: AuditService,
-        openai_client: OpenAIClient,
+        prompt_builder: PromptBuilderService,
+        generation_service: GenerationService,
         context_builder: ContextBuilderService | None = None,
         session_cache: SessionCache | None = None,
         conversation_manager: ConversationManager | None = None,
     ) -> None:
         self.repository = repository
         self.retrieval_service = retrieval_service
-        self.prompt_service = prompt_service
         self.policy_engine = policy_engine
-        self.output_guard = output_guard
         self.audit_service = audit_service
-        self.openai_client = openai_client
+        self.prompt_builder = prompt_builder
+        self.generation_service = generation_service
         self.context_builder = context_builder or ContextBuilderService()
         self.session_cache = session_cache
         self.conversation_manager = conversation_manager or ConversationManager(repository)
@@ -61,7 +58,6 @@ class ChatService:
                 session.summary = cached_summary
         conversation_context = self.conversation_manager.build_context(session, user, payload.query)
         request_id = f"req_{uuid.uuid4().hex[:12]}"
-        template = self.prompt_service.get_template(payload.scene)
         retrieved = self.retrieval_service.retrieve(
             user,
             payload.query,
@@ -71,23 +67,21 @@ class ChatService:
         input_risk_action = risk_action
         assembled_context = self.context_builder.build(retrieved)
         citations = assembled_context.citations
-        raw_answer = self._build_answer(
+        prompt_build = self.prompt_builder.build_chat_prompt(
+            scene=payload.scene,
             query=conversation_context.rewritten_query,
-            template=template,
             assembled_context=assembled_context,
-            risk_action=risk_action,
             session_summary=conversation_context.session_summary,
         )
-        guard_result = self.output_guard.apply(
+        generation = self.generation_service.generate_chat_answer(
             user=user,
-            answer=raw_answer,
-            citations=citations,
-            risk_action=risk_action,
+            prompt_build=prompt_build,
+            input_risk_action=risk_action,
+            input_risk_level=risk_level,
         )
-        validation = self.prompt_service.validate_output(payload.scene, guard_result.answer)
-        answer = validation.normalized_answer
-        risk_action = guard_result.action
-        risk_level = self._max_risk_level(risk_level, guard_result.risk_level)
+        answer = generation.answer
+        risk_action = generation.action
+        risk_level = generation.risk_level
 
         self._append_message(session.id, "user", payload.query)
         self._append_message(session.id, "assistant", answer, citations)
@@ -113,11 +107,11 @@ class ChatService:
             risk_level=risk_level,
             action=risk_action.value,
             latency_ms=latency_ms,
-            template=template,
+            template=prompt_build.template,
             conversation_context=conversation_context,
             input_action=input_risk_action.value,
-            output_guard_result=guard_result,
-            validation_result=validation,
+            output_guard_result=generation.guard_result,
+            validation_result=generation.validation_result,
         )
 
         return ChatQueryResponse(
@@ -130,13 +124,6 @@ class ChatService:
             rewritten_query=conversation_context.rewritten_query,
             topic_switched=conversation_context.topic_switched,
         )
-
-    @staticmethod
-    def _max_risk_level(current: str, candidate: str) -> str:
-        """Return the higher-severity risk level between input and output-stage decisions."""
-
-        ranking = {"low": 1, "medium": 2, "high": 3}
-        return candidate if ranking.get(candidate, 0) > ranking.get(current, 0) else current
 
     def list_sessions(self, user: UserContext) -> list[ChatSession]:
         """List sessions that belong to the current user inside the current tenant."""
@@ -198,39 +185,4 @@ class ChatService:
                 token_usage=max(len(content.split()), 1),
                 created_at=utcnow(),
             )
-        )
-
-    def _build_answer(self, query: str, template, assembled_context, risk_action: RiskAction, session_summary: str) -> str:
-        """Generate one answer with OpenAI when configured, otherwise fall back to deterministic text."""
-
-        if risk_action == RiskAction.REFUSE:
-            return (
-                "结论：当前请求触发了安全策略，平台已拒绝回答。\n"
-                "依据：问题中包含高风险指令或疑似 Prompt Injection 特征。"
-            )
-        if not assembled_context.results:
-            if risk_action == RiskAction.CITATIONS_ONLY:
-                return "结论：根据当前已授权资料无法确认。\n依据：高敏部门在无证据命中时只返回保守结果。"
-            return "结论：根据当前已授权资料无法确认。\n依据：检索范围内没有找到足够证据。"
-
-        if self.openai_client.can_execute():
-            rendered_prompt = self.prompt_service.render_chat_prompt(
-                template=template,
-                query=query,
-                assembled_context=assembled_context,
-                session_summary=session_summary,
-            )
-            try:
-                return self.openai_client.generate_response(
-                    instructions=rendered_prompt.instructions,
-                    input_text=rendered_prompt.input_text,
-                )
-            except Exception:
-                pass
-
-        return (
-            "结论：已基于授权知识范围给出回答。\n"
-            f"依据：问题“{query}”命中了 {assembled_context.retrieved_chunks} 个权限内知识片段，模板策略为 {template.name}。\n"
-            + "\n".join(assembled_context.fallback_evidence_lines)
-            + f"\n引用来源：{assembled_context.citation_text}"
         )

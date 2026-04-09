@@ -2,6 +2,8 @@ from functools import lru_cache
 
 from app.application.context.builder import ContextBuilderService
 from app.application.conversation.memory import ConversationManager
+from app.application.generation.service import GenerationService
+from app.application.prompting.builder import PromptBuilderService
 from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.application.retrieval.planning import RecallPlanningService
@@ -182,6 +184,13 @@ def get_prompt_service() -> PromptService:
 
 
 @lru_cache
+def get_prompt_builder_service() -> PromptBuilderService:
+    """Return the prompt build service used to render template + context payloads."""
+
+    return PromptBuilderService(get_prompt_service())
+
+
+@lru_cache
 def get_policy_engine() -> PolicyEngine:
     """Return the risk policy engine."""
 
@@ -200,6 +209,17 @@ def get_context_builder_service() -> ContextBuilderService:
     """Return the context assembly service used by chat and prompt preview flows."""
 
     return ContextBuilderService()
+
+
+@lru_cache
+def get_generation_service() -> GenerationService:
+    """Return the generation service that owns model invocation, guard, and validation."""
+
+    return GenerationService(
+        prompt_service=get_prompt_service(),
+        output_guard=get_output_guard(),
+        openai_client=get_openai_client(),
+    )
 
 
 @lru_cache
@@ -295,11 +315,10 @@ def get_chat_service() -> ChatService:
     return ChatService(
         repository=get_repository(),
         retrieval_service=get_retrieval_service(),
-        prompt_service=get_prompt_service(),
         policy_engine=get_policy_engine(),
-        output_guard=get_output_guard(),
         audit_service=get_audit_service(),
-        openai_client=get_openai_client(),
+        prompt_builder=get_prompt_builder_service(),
+        generation_service=get_generation_service(),
         context_builder=get_context_builder_service(),
         session_cache=get_session_cache(),
         conversation_manager=ConversationManager(
