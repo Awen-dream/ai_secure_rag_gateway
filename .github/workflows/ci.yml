@@ -64,6 +64,7 @@ jobs:
       APP_EVAL_RUNS_DIR: .data/ci/evaluation/runs
       APP_EVAL_BASELINE_PATH: .data/ci/evaluation/baseline.json
       APP_DOCUMENT_STAGING_DIR: .data/ci/staging/documents
+      PYTHONPATH: .
       OPENAI_API_KEY: ""
     steps:
       - name: Checkout
