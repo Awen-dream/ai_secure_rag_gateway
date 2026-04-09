@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from app.application.context.builder import ContextBuilderService
+from app.application.chat.orchestrator import ChatOrchestrator
 from app.application.conversation.memory import ConversationManager
 from app.application.generation.service import GenerationService
 from app.application.prompting.builder import PromptBuilderService
@@ -13,9 +14,8 @@ from app.core.config import settings
 from app.application.conversation.session_cache import SessionCache
 from app.application.query.retrieval_cache import RetrievalCache
 from app.domain.audit.services import AuditService
-from app.domain.chat.services import ChatService
 from app.domain.documents.services import DocumentService
-from app.domain.prompts.services import PromptService
+from app.domain.prompts.template_service import PromptTemplateService
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.domain.retrieval.rerankers import HeuristicReranker
 from app.domain.retrieval.services import RetrievalService
@@ -177,17 +177,24 @@ def get_document_service() -> DocumentService:
 
 
 @lru_cache
-def get_prompt_service() -> PromptService:
-    """Return the prompt template service."""
+def get_prompt_template_service() -> PromptTemplateService:
+    """Return the prompt template registry and validation service."""
 
-    return PromptService(get_repository())
+    return PromptTemplateService(get_repository())
+
+
+@lru_cache
+def get_prompt_service() -> PromptTemplateService:
+    """Compatibility alias for the prompt template service getter."""
+
+    return get_prompt_template_service()
 
 
 @lru_cache
 def get_prompt_builder_service() -> PromptBuilderService:
     """Return the prompt build service used to render template + context payloads."""
 
-    return PromptBuilderService(get_prompt_service())
+    return PromptBuilderService(get_prompt_template_service())
 
 
 @lru_cache
@@ -216,7 +223,7 @@ def get_generation_service() -> GenerationService:
     """Return the generation service that owns model invocation, guard, and validation."""
 
     return GenerationService(
-        prompt_service=get_prompt_service(),
+        prompt_template_service=get_prompt_template_service(),
         output_guard=get_output_guard(),
         openai_client=get_openai_client(),
     )
@@ -309,10 +316,10 @@ def get_retrieval_service() -> RetrievalService:
 
 
 @lru_cache
-def get_chat_service() -> ChatService:
-    """Return the chat service with retrieval, policy and audit dependencies wired."""
+def get_chat_service() -> ChatOrchestrator:
+    """Return the application chat orchestrator with all online-QA dependencies wired."""
 
-    return ChatService(
+    return ChatOrchestrator(
         repository=get_repository(),
         retrieval_service=get_retrieval_service(),
         policy_engine=get_policy_engine(),

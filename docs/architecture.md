@@ -1,3 +1,101 @@
 # Architecture
 
-本项目按 `api / domain / application / infrastructure` 分层，突出企业知识访问网关的边界与职责。
+本项目按 `api / application / domain / infrastructure` 分层，在线问答主链按步骤拆成清晰的编排层和能力层。
+
+## Layering
+
+### `api`
+- 负责 HTTP 路由、鉴权依赖注入、请求响应模型绑定。
+- 典型入口：
+  - `app/api/v1/chat.py`
+  - `app/api/v1/admin.py`
+  - `app/api/deps.py`
+
+### `application`
+- 负责跨领域的流程编排，是在线问答链路的主承载层。
+- 当前在线问答相关模块：
+  - `app/application/conversation`
+    - 会话上下文、follow-up、session cache
+  - `app/application/query`
+    - query understanding、rewrite、query planning
+  - `app/application/retrieval`
+    - recall planning、rerank layer
+  - `app/application/context`
+    - context assembly
+  - `app/application/prompting`
+    - prompt build
+  - `app/application/generation`
+    - generation、fallback、guard、validation
+  - `app/application/chat`
+    - 端到端 chat orchestration
+
+### `domain`
+- 负责业务实体、领域模型、领域规则和可复用的领域服务。
+- 典型内容：
+  - `app/domain/chat/models.py`, `schemas.py`
+  - `app/domain/prompts/models.py`
+  - `app/domain/retrieval/models.py`, `rerankers.py`
+  - `app/domain/risk/*`
+  - `app/domain/documents/*`
+
+### `infrastructure`
+- 负责外部系统接入和底层实现。
+- 典型内容：
+  - `app/infrastructure/llm`
+  - `app/infrastructure/search`
+  - `app/infrastructure/vectorstore`
+  - `app/infrastructure/db`
+  - `app/infrastructure/external_sources`
+  - `app/infrastructure/cache`
+
+## Online QA Flow
+
+当前在线问答链路对应关系如下：
+
+1. `Access / Session`
+   - `app/application/conversation/memory.py`
+2. `Query Planning`
+   - `app/application/query/planning.py`
+   - `app/application/query/understanding.py`
+   - `app/application/query/rewrite.py`
+3. `Recall Planning`
+   - `app/application/retrieval/planning.py`
+4. `Retrieval Execution`
+   - `app/domain/retrieval/services.py`
+   - `app/infrastructure/search/elasticsearch.py`
+   - `app/infrastructure/vectorstore/pgvector.py`
+5. `Rerank`
+   - `app/application/retrieval/rerank.py`
+   - `app/domain/retrieval/rerankers.py`
+6. `Context Assembly`
+   - `app/application/context/builder.py`
+7. `Prompt Build`
+   - `app/application/prompting/builder.py`
+8. `Generation & Guard`
+   - `app/application/generation/service.py`
+9. `Chat Orchestration`
+   - `app/application/chat/orchestrator.py`
+
+## Naming Conventions
+
+- `*Orchestrator`
+  - 用于端到端流程编排，例如 `ChatOrchestrator`
+- `*PlanningService`
+  - 用于“决定下一步怎么做”的计划层，例如 `QueryPlanningService`、`RecallPlanningService`
+- `*BuilderService`
+  - 用于把上游结果组装成下游可消费对象，例如 `ContextBuilderService`、`PromptBuilderService`
+- `*RerankService`
+  - 用于多路候选结果的融合、打分和重排编排
+- `*TemplateService`
+  - 用于模板生命周期和模板级校验
+
+## Compatibility Shims
+
+为了降低迁移成本，下面两个旧路径暂时保留为兼容别名：
+
+- `app/domain/chat/services.py`
+  - 兼容导出 `ChatService -> ChatOrchestrator`
+- `app/domain/prompts/services.py`
+  - 兼容导出 `PromptService -> PromptTemplateService`
+
+后续新代码应优先直接依赖新的实现路径。

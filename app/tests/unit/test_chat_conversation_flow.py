@@ -13,6 +13,7 @@ class ChatConversationFlowTest(unittest.TestCase):
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["APP_REDIS_MODE"] = "local-fallback"
+        os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
         os.environ["OPENAI_API_KEY"] = ""
 
         from app.core.config import settings
@@ -21,6 +22,7 @@ class ChatConversationFlowTest(unittest.TestCase):
         settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
         settings.redis_mode = "local-fallback"
+        settings.rate_limit_max_requests = 30
         settings.openai_api_key = None
         RedisClient.reset_local_state()
 
@@ -43,11 +45,13 @@ class ChatConversationFlowTest(unittest.TestCase):
             get_policy_engine,
             get_prompt_builder_service,
             get_generation_service,
+            get_prompt_template_service,
             get_query_planning_service,
             get_recall_planning_service,
             get_retrieval_rerank_service,
             get_query_understanding_service,
             get_prompt_service,
+            get_prompt_template_service,
             get_rate_limit_service,
             get_redis_client,
             get_repository,
@@ -77,6 +81,7 @@ class ChatConversationFlowTest(unittest.TestCase):
             get_document_service,
             get_retrieval_reranker,
             get_prompt_service,
+            get_prompt_template_service,
             get_policy_engine,
             get_output_guard,
             get_context_builder_service,

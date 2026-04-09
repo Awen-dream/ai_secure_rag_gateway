@@ -2,6 +2,8 @@ from app.application.query.planning import QueryPlanningService
 
 
 def prepare_query(query: str) -> dict:
+    """Legacy helper kept for lightweight tooling that needs query-planning output as plain dict."""
+
     result = QueryPlanningService().plan(query)
     understanding = result.understanding
     return {

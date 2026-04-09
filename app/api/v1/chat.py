@@ -3,11 +3,11 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from app.application.chat.orchestrator import ChatOrchestrator
 from app.api.deps import get_chat_service, get_rate_limit_service
 from app.core.security import get_current_user
 from app.domain.auth.models import UserContext
 from app.domain.chat.schemas import ChatQueryRequest, ChatQueryResponse
-from app.domain.chat.services import ChatService
 from app.domain.risk.rate_limit import RateLimitService
 
 router = APIRouter()
@@ -17,7 +17,7 @@ router = APIRouter()
 def query_chat(
     payload: ChatQueryRequest,
     user: UserContext = Depends(get_current_user),
-    service: ChatService = Depends(get_chat_service),
+    service: ChatOrchestrator = Depends(get_chat_service),
     rate_limiter: RateLimitService = Depends(get_rate_limit_service),
 ) -> ChatQueryResponse:
     allowed, _ = rate_limiter.check_user(user.user_id, scope="chat.query")
@@ -33,7 +33,7 @@ def query_chat(
 def stream_chat(
     payload: ChatQueryRequest,
     user: UserContext = Depends(get_current_user),
-    service: ChatService = Depends(get_chat_service),
+    service: ChatOrchestrator = Depends(get_chat_service),
     rate_limiter: RateLimitService = Depends(get_rate_limit_service),
 ) -> StreamingResponse:
     allowed, _ = rate_limiter.check_user(user.user_id, scope="chat.stream")
@@ -53,7 +53,7 @@ def stream_chat(
 @router.get("/sessions")
 def list_sessions(
     user: UserContext = Depends(get_current_user),
-    service: ChatService = Depends(get_chat_service),
+    service: ChatOrchestrator = Depends(get_chat_service),
 ) -> list[dict]:
     return [session.dict() for session in service.list_sessions(user)]
 
@@ -62,7 +62,7 @@ def list_sessions(
 def get_session_detail(
     session_id: str,
     user: UserContext = Depends(get_current_user),
-    service: ChatService = Depends(get_chat_service),
+    service: ChatOrchestrator = Depends(get_chat_service),
 ) -> dict:
     try:
         detail = service.get_session_detail(session_id, user)

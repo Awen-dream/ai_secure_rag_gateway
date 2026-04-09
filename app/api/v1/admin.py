@@ -14,7 +14,7 @@ from app.api.deps import (
     get_keyword_backend,
     get_policy_engine,
     get_prompt_builder_service,
-    get_prompt_service,
+    get_prompt_template_service,
     get_redis_client,
     get_retrieval_service,
     get_vector_backend,
@@ -30,7 +30,7 @@ from app.domain.prompts.models import (
     PromptValidationRequest,
     PromptValidationResult,
 )
-from app.domain.prompts.services import PromptService
+from app.domain.prompts.template_service import PromptTemplateService
 from app.domain.retrieval.models import (
     RetrievalBackendHealth,
     RetrievalBackendInfo,
@@ -65,7 +65,7 @@ router = APIRouter()
 def list_prompt_templates(
     scene: Optional[str] = None,
     _: UserContext = Depends(require_admin),
-    service: PromptService = Depends(get_prompt_service),
+    service: PromptTemplateService = Depends(get_prompt_template_service),
 ) -> list[PromptTemplate]:
     return service.list_templates(scene)
 
@@ -74,7 +74,7 @@ def list_prompt_templates(
 def create_prompt_template(
     payload: PromptTemplate,
     _: UserContext = Depends(require_admin),
-    service: PromptService = Depends(get_prompt_service),
+    service: PromptTemplateService = Depends(get_prompt_template_service),
 ) -> PromptTemplate:
     return service.add_template(payload)
 
@@ -84,7 +84,7 @@ def set_prompt_template_enabled(
     template_id: str,
     enabled: bool = Query(...),
     _: UserContext = Depends(require_admin),
-    service: PromptService = Depends(get_prompt_service),
+    service: PromptTemplateService = Depends(get_prompt_template_service),
 ) -> PromptTemplate:
     """Enable or disable one prompt template version."""
 
@@ -118,7 +118,7 @@ def preview_prompt_template(
 def validate_prompt_output(
     payload: PromptValidationRequest,
     _: UserContext = Depends(require_admin),
-    service: PromptService = Depends(get_prompt_service),
+    service: PromptTemplateService = Depends(get_prompt_template_service),
 ) -> PromptValidationResult:
     """Validate one answer against the active prompt template output schema."""
 

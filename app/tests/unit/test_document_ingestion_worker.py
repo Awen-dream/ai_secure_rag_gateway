@@ -31,6 +31,7 @@ class DocumentIngestionWorkerTest(unittest.TestCase):
         os.environ["APP_REPOSITORY_BACKEND"] = "sqlite"
         os.environ["APP_SQLITE_PATH"] = self.db_path
         os.environ["APP_REDIS_MODE"] = "local-fallback"
+        os.environ["APP_RATE_LIMIT_MAX_REQUESTS"] = "30"
         os.environ["APP_DOCUMENT_STAGING_DIR"] = self.staging_dir
         os.environ["APP_DOCUMENT_INGESTION_QUEUE_NAME"] = "queue:test_document_ingestion_worker"
         os.environ["OPENAI_API_KEY"] = ""
@@ -41,6 +42,7 @@ class DocumentIngestionWorkerTest(unittest.TestCase):
         settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
         settings.redis_mode = "local-fallback"
+        settings.rate_limit_max_requests = 30
         settings.document_staging_dir = self.staging_dir
         settings.document_ingestion_queue_name = "queue:test_document_ingestion_worker"
         settings.openai_api_key = None
@@ -62,11 +64,13 @@ class DocumentIngestionWorkerTest(unittest.TestCase):
             get_policy_engine,
             get_prompt_builder_service,
             get_generation_service,
+            get_prompt_template_service,
             get_query_planning_service,
             get_recall_planning_service,
             get_retrieval_rerank_service,
             get_query_understanding_service,
             get_prompt_service,
+            get_prompt_template_service,
             get_rate_limit_service,
             get_redis_client,
             get_repository,
@@ -91,6 +95,7 @@ class DocumentIngestionWorkerTest(unittest.TestCase):
             get_document_ingestion_worker,
             get_document_service,
             get_prompt_service,
+            get_prompt_template_service,
             get_policy_engine,
             get_output_guard,
             get_context_builder_service,

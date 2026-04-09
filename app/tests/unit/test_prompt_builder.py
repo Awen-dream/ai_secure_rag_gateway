@@ -33,8 +33,9 @@ class PromptBuilderServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(built.template.name, "Standard QA")
-        self.assertIn("session=上轮在问报销制度", built.rendered_prompt.instructions)
-        self.assertIn("Q:报销审批时限是什么？", built.rendered_prompt.input_text)
+        self.assertIn("Use evidence only.", built.rendered_prompt.instructions)
+        self.assertIn("用户问题：", built.rendered_prompt.input_text)
+        self.assertIn("报销审批时限是什么？", built.rendered_prompt.input_text)
 
 
 if __name__ == "__main__":

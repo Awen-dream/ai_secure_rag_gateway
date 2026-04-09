@@ -24,7 +24,7 @@ class _PromptServiceStub:
 class GenerationServiceTest(unittest.TestCase):
     def test_generate_chat_answer_uses_fallback_when_no_results(self) -> None:
         service = GenerationService(
-            prompt_service=_PromptServiceStub(),
+            prompt_template_service=_PromptServiceStub(),
             output_guard=OutputGuard(),
             openai_client=OpenAIClient(
                 api_key=None,

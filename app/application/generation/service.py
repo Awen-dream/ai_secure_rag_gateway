@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from app.application.prompting.builder import PromptBuildResult
 from app.domain.auth.models import UserContext
 from app.domain.prompts.models import PromptValidationResult
-from app.domain.prompts.services import PromptService
+from app.domain.prompts.template_service import PromptTemplateService
 from app.domain.risk.models import OutputGuardResult, RiskAction
 from app.domain.risk.output_guard import OutputGuard
 from app.infrastructure.llm.openai_client import OpenAIClient
@@ -26,11 +26,11 @@ class GenerationService:
 
     def __init__(
         self,
-        prompt_service: PromptService,
+        prompt_template_service: PromptTemplateService,
         output_guard: OutputGuard,
         openai_client: OpenAIClient,
     ) -> None:
-        self.prompt_service = prompt_service
+        self.prompt_template_service = prompt_template_service
         self.output_guard = output_guard
         self.openai_client = openai_client
 
@@ -48,7 +48,7 @@ class GenerationService:
             citations=prompt_build.assembled_context.citations,
             risk_action=input_risk_action,
         )
-        validation = self.prompt_service.validate_output(prompt_build.scene, guard_result.answer)
+        validation = self.prompt_template_service.validate_output(prompt_build.scene, guard_result.answer)
         return GenerationResult(
             raw_answer=raw_answer,
             answer=validation.normalized_answer,

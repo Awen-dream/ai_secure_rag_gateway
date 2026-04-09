@@ -9,7 +9,7 @@ from app.domain.documents.models import DocumentChunk, DocumentRecord
 
 
 class BackendSearchHit(BaseModel):
-    """Represents a raw backend hit before hybrid fusion is applied."""
+    """Represents a raw backend hit before rerank-layer candidate shaping is applied."""
 
     document: DocumentRecord
     chunk: DocumentChunk
