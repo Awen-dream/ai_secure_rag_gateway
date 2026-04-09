@@ -18,6 +18,14 @@ class RedisClient:
     _local_store: dict[str, tuple[str, Optional[float]]] = {}
     _local_queues: dict[str, list[str]] = {}
 
+    @classmethod
+    def reset_local_state(cls) -> None:
+        """Clear process-local fallback data, primarily for isolated test setup."""
+
+        with cls._local_lock:
+            cls._local_store.clear()
+            cls._local_queues.clear()
+
     def __init__(self, mode: str = "local-fallback", url: str | None = None) -> None:
         self.mode = mode
         self.url = url

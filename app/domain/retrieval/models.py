@@ -54,6 +54,11 @@ class RetrievalExplainResponse(BaseModel):
     rule_intent: str = "standard_qa"
     rule_intent_confidence: float = 0.0
     rule_intent_reasons: List[str] = Field(default_factory=list)
+    query_keywords: List[str] = Field(default_factory=list)
+    expanded_terms: List[str] = Field(default_factory=list)
+    tag_filters: List[str] = Field(default_factory=list)
+    year_filters: List[int] = Field(default_factory=list)
+    recency_hint: bool = False
     profile: RetrievalProfile
     results: List[RetrievalResult] = Field(default_factory=list)
 

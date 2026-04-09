@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from app.application.conversation.summarizer import summarize_long_history
 from app.application.query.intent import classify_query_intent
-from app.application.query.rewrite import rewrite_query
+from app.application.query.planning import QueryPlanningResult, QueryPlanningService
+from app.application.query.rewrite import QueryRewritePlan, rewrite_query
 from app.application.query.understanding import QueryUnderstandingResult, QueryUnderstandingService
 from app.domain.auth.models import UserContext
 from app.domain.chat.models import ChatMessage, ChatSession
@@ -30,13 +31,24 @@ FOLLOW_UP_MARKERS = {
 
 @dataclass(frozen=True)
 class ConversationContext:
-    rewritten_query: str
-    query_understanding: QueryUnderstandingResult
+    query_plan: QueryPlanningResult
     session_summary: str
     topic_switched: bool
     active_topic: str
     used_history: bool
     permission_signature: str
+
+    @property
+    def rewritten_query(self) -> str:
+        return self.query_plan.rewritten_query
+
+    @property
+    def rewrite_plan(self) -> QueryRewritePlan:
+        return self.query_plan.rewrite_plan
+
+    @property
+    def query_understanding(self) -> QueryUnderstandingResult:
+        return self.query_plan.understanding
 
 
 def build_permission_signature(user: UserContext) -> str:
@@ -59,10 +71,11 @@ class ConversationManager:
     def __init__(
         self,
         repository: MetadataRepository,
+        query_planning: QueryPlanningService | None = None,
         query_understanding: QueryUnderstandingService | None = None,
     ) -> None:
         self.repository = repository
-        self.query_understanding = query_understanding or QueryUnderstandingService()
+        self.query_planning = query_planning or QueryPlanningService(query_understanding or QueryUnderstandingService())
 
     def build_context(self, session: ChatSession, user: UserContext, query: str) -> ConversationContext:
         """Rewrite the current query using recent history, topic continuity, and permission boundaries."""
@@ -77,20 +90,18 @@ class ConversationManager:
         topic_switched = self._did_topic_switch(previous_topic, active_topic)
         should_use_history = bool(messages) and not permission_changed and not topic_switched and self._is_follow_up(query)
 
-        understanding = self.query_understanding.understand(
+        query_plan = self.query_planning.plan(
             query,
             last_user_query=last_user_query if should_use_history else None,
             session_summary=summary if should_use_history else None,
         )
-        rewritten_query = understanding.rewritten_query
 
         if permission_changed:
             active_topic = self._infer_topic(query)
             summary = ""
 
         return ConversationContext(
-            rewritten_query=rewritten_query,
-            query_understanding=understanding,
+            query_plan=query_plan,
             session_summary=summary,
             topic_switched=topic_switched or permission_changed,
             active_topic=active_topic,

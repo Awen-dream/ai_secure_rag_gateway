@@ -60,7 +60,11 @@ class ChatService:
         conversation_context = self.conversation_manager.build_context(session, user, payload.query)
         request_id = f"req_{uuid.uuid4().hex[:12]}"
         template = self.prompt_service.get_template(payload.scene)
-        retrieved = self.retrieval_service.retrieve(user, conversation_context.rewritten_query)
+        retrieved = self.retrieval_service.retrieve(
+            user,
+            payload.query,
+            query_plan=conversation_context.query_plan,
+        )
         risk_action, risk_level = self.policy_engine.evaluate(user, conversation_context.rewritten_query, len(retrieved))
         input_risk_action = risk_action
         citations = build_citations(retrieved)

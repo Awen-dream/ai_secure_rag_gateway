@@ -32,7 +32,7 @@ class AppSettings(BaseModel):
     embedding_dimensions: Optional[int] = (
         int(os.getenv("APP_EMBEDDING_DIMENSIONS")) if os.getenv("APP_EMBEDDING_DIMENSIONS") else None
     )
-    reranker_mode: str = os.getenv("APP_RERANKER_MODE", "heuristic")
+    reranker_mode: str = os.getenv("APP_RERANKER_MODE", "cross-encoder-fallback")
     reranker_top_n: int = int(os.getenv("APP_RERANKER_TOP_N", "8"))
     elasticsearch_index: str = os.getenv("APP_ELASTICSEARCH_INDEX", "knowledge_chunks")
     elasticsearch_mode: str = os.getenv("APP_ELASTICSEARCH_MODE", "local-fallback")

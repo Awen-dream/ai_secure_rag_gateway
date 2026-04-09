@@ -96,9 +96,11 @@ class QueryUnderstandingService:
         last_user_query: str | None = None,
         session_summary: str | None = None,
     ) -> QueryUnderstandingResult:
-        rewritten_query = rewrite_query(query)
-        if last_user_query:
-            rewritten_query = rewrite_query(f"{last_user_query} {query}")
+        rewritten_query = rewrite_query(
+            query,
+            last_user_query=last_user_query,
+            session_summary=session_summary,
+        )
         intent_result = classify_query_intent_details(rewritten_query)
         return QueryUnderstandingResult(
             rewritten_query=rewritten_query,

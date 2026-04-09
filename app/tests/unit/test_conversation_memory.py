@@ -187,6 +187,8 @@ class ConversationMemoryTest(unittest.TestCase):
         context = manager.build_context(session, build_user(), "审批时限呢？")
 
         self.assertEqual(context.rewritten_query, "报销制度的审批时限是什么？")
+        self.assertEqual(context.rewrite_plan.rewritten_query, "报销制度的审批时限是什么？")
+        self.assertIn("审批时限", context.rewrite_plan.expanded_terms)
         self.assertEqual(len(understanding.calls), 1)
         self.assertEqual(understanding.calls[0]["query"], "审批时限呢？")
         self.assertEqual(understanding.calls[0]["last_user_query"], "报销制度是什么？")

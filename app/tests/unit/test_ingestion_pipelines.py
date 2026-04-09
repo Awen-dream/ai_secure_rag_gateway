@@ -118,6 +118,23 @@ class ChunkTextTests(unittest.TestCase):
         self.assertIn("epsilon zeta eta theta", chunks[0].text)
         self.assertIn("epsilon zeta eta theta", chunks[1].text)
 
+    def test_chunk_document_applies_pdf_specific_chunk_limits(self) -> None:
+        content = (
+            "# Policy\n"
+            + "\n\n".join(
+                f"第{i}段：这是用于验证 PDF 文档分块策略的长段落，包含审批、权限、审计和流程说明。" for i in range(1, 9)
+            )
+        )
+
+        with patch.object(pipelines.settings, "chunk_max_tokens", 420), patch.object(
+            pipelines.settings, "chunk_overlap_tokens", 20
+        ):
+            manual_chunks = chunk_document(content, source_type="manual")
+            pdf_chunks = chunk_document(content, source_type="pdf")
+
+        self.assertGreaterEqual(len(pdf_chunks), len(manual_chunks))
+        self.assertTrue(all(chunk.token_count <= 320 for chunk in pdf_chunks))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,7 +42,7 @@ class DocumentIngestionOrchestrator:
             content = extract_text_from_bytes(source_bytes, document.source_type, document.title)
             self._update_document_status(document, DocumentStatus.CHUNKING)
 
-            chunk_payloads = chunk_document(content)
+            chunk_payloads = chunk_document(content, source_type=document.source_type)
             chunks = [
                 DocumentChunk(
                     id=f"chunk_{uuid.uuid4().hex[:12]}",

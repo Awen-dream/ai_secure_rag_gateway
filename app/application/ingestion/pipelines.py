@@ -41,9 +41,24 @@ class _Section:
 def _resolve_chunk_limits(
     max_tokens: int | None,
     overlap_tokens: int | None,
+    source_type: str | None = None,
+    content: str | None = None,
 ) -> tuple[int, int]:
     resolved_max_tokens = max_tokens if max_tokens is not None else settings.chunk_max_tokens
     resolved_overlap_tokens = overlap_tokens if overlap_tokens is not None else settings.chunk_overlap_tokens
+    normalized_source_type = (source_type or "").lower()
+
+    if max_tokens is None or overlap_tokens is None:
+        adjusted_max_tokens, adjusted_overlap_tokens = _document_type_chunk_limits(
+            normalized_source_type,
+            resolved_max_tokens,
+            resolved_overlap_tokens,
+            content or "",
+        )
+        if max_tokens is None:
+            resolved_max_tokens = adjusted_max_tokens
+        if overlap_tokens is None:
+            resolved_overlap_tokens = adjusted_overlap_tokens
 
     resolved_max_tokens = max(int(resolved_max_tokens), 1)
     resolved_overlap_tokens = max(int(resolved_overlap_tokens), 0)
@@ -51,6 +66,23 @@ def _resolve_chunk_limits(
         return resolved_max_tokens, 0
 
     return resolved_max_tokens, min(resolved_overlap_tokens, resolved_max_tokens - 1)
+
+
+def _document_type_chunk_limits(
+    source_type: str,
+    max_tokens: int,
+    overlap_tokens: int,
+    content: str,
+) -> tuple[int, int]:
+    if source_type == "pdf":
+        return min(max_tokens, 320), max(overlap_tokens, 80)
+    if source_type == "html":
+        return min(max_tokens, 340), max(overlap_tokens, 70)
+    if source_type == "docx":
+        return min(max_tokens, 360), max(overlap_tokens, 70)
+    if source_type == "markdown" and ("```" in content or "~~~" in content):
+        return min(max_tokens, 280), max(overlap_tokens, 40)
+    return max_tokens, overlap_tokens
 
 
 def _normalize_heading_title(title: str) -> str:
@@ -498,8 +530,14 @@ def chunk_document(
     content: str,
     max_tokens: int | None = None,
     overlap_tokens: int | None = None,
+    source_type: str | None = None,
 ) -> list[ChunkPayload]:
-    max_tokens, overlap_tokens = _resolve_chunk_limits(max_tokens, overlap_tokens)
+    max_tokens, overlap_tokens = _resolve_chunk_limits(
+        max_tokens,
+        overlap_tokens,
+        source_type=source_type,
+        content=content,
+    )
     sections = _split_sections(content)
     if not sections:
         stripped = content.strip()
@@ -524,5 +562,14 @@ def chunk_text(
     content: str,
     max_tokens: int | None = None,
     overlap_tokens: int | None = None,
+    source_type: str | None = None,
 ) -> list[str]:
-    return [chunk.text for chunk in chunk_document(content, max_tokens=max_tokens, overlap_tokens=overlap_tokens)]
+    return [
+        chunk.text
+        for chunk in chunk_document(
+            content,
+            max_tokens=max_tokens,
+            overlap_tokens=overlap_tokens,
+            source_type=source_type,
+        )
+    ]

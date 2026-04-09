@@ -2,6 +2,7 @@ from functools import lru_cache
 
 from app.application.conversation.memory import ConversationManager
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
+from app.application.query.planning import QueryPlanningService
 from app.application.query.understanding import QueryUnderstandingService
 from app.core.config import settings
 from app.application.conversation.session_cache import SessionCache
@@ -234,6 +235,20 @@ def get_retrieval_reranker() -> HeuristicReranker:
 
 
 @lru_cache
+def get_query_understanding_service() -> QueryUnderstandingService:
+    """Return the shared query-understanding service used by planning and retrieval."""
+
+    return QueryUnderstandingService(get_openai_client())
+
+
+@lru_cache
+def get_query_planning_service() -> QueryPlanningService:
+    """Return the query-planning service that composes understanding and rewrite planning."""
+
+    return QueryPlanningService(get_query_understanding_service())
+
+
+@lru_cache
 def get_retrieval_service() -> RetrievalService:
     """Return the hybrid retrieval service backed by Elasticsearch and PGVector adapters."""
 
@@ -243,7 +258,7 @@ def get_retrieval_service() -> RetrievalService:
         vector_backend=get_vector_backend(),
         retrieval_cache=get_retrieval_cache(),
         reranker=get_retrieval_reranker(),
-        query_understanding=QueryUnderstandingService(get_openai_client()),
+        query_planning=get_query_planning_service(),
     )
 
 
@@ -262,7 +277,7 @@ def get_chat_service() -> ChatService:
         session_cache=get_session_cache(),
         conversation_manager=ConversationManager(
             get_repository(),
-            query_understanding=QueryUnderstandingService(get_openai_client()),
+            query_planning=get_query_planning_service(),
         ),
     )
 

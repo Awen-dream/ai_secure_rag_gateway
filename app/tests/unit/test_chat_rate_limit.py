@@ -18,6 +18,7 @@ class ChatRateLimitTest(unittest.TestCase):
         os.environ["OPENAI_API_KEY"] = ""
 
         from app.core.config import settings
+        from app.infrastructure.cache.redis_client import RedisClient
 
         settings.repository_backend = "sqlite"
         settings.sqlite_path = self.db_path
@@ -25,6 +26,7 @@ class ChatRateLimitTest(unittest.TestCase):
         settings.rate_limit_window_seconds = 60
         settings.rate_limit_max_requests = 1
         settings.openai_api_key = None
+        RedisClient.reset_local_state()
 
         from app.api.deps import (
             get_audit_service,
@@ -42,6 +44,8 @@ class ChatRateLimitTest(unittest.TestCase):
             get_openai_client,
             get_output_guard,
             get_policy_engine,
+            get_query_planning_service,
+            get_query_understanding_service,
             get_prompt_service,
             get_rate_limit_service,
             get_redis_client,
@@ -76,6 +80,8 @@ class ChatRateLimitTest(unittest.TestCase):
             get_output_guard,
             get_audit_service,
             get_openai_client,
+            get_query_understanding_service,
+            get_query_planning_service,
             get_retrieval_service,
             get_chat_service,
         ):
