@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.application.access.service import build_access_filter
 from app.application.context.builder import ContextBuilderService
+from app.application.evaluation.service import OfflineEvaluationService
 from app.application.prompting.builder import PromptBuilderService
 from app.application.query.planning import QueryPlanningService
 from app.application.retrieval.planning import RecallPlanningService
@@ -14,6 +15,7 @@ from app.api.deps import (
     get_audit_service,
     get_context_builder_service,
     get_document_task_queue,
+    get_offline_evaluation_service,
     get_feishu_source_sync_service,
     get_keyword_backend,
     get_policy_engine,
@@ -28,6 +30,7 @@ from app.api.deps import (
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
+from app.domain.evaluation.models import EvalRunResult, EvalSample
 from app.domain.prompts.models import (
     PromptPreviewRequest,
     PromptPreviewResponse,
@@ -64,6 +67,27 @@ from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
 router = APIRouter()
+
+
+@router.get("/evaluation/dataset", response_model=list[EvalSample])
+def list_evaluation_dataset(
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> list[EvalSample]:
+    """List the currently loaded offline evaluation dataset."""
+
+    return service.list_samples()
+
+
+@router.post("/evaluation/run", response_model=EvalRunResult)
+def run_offline_evaluation(
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    _: UserContext = Depends(require_admin),
+    service: OfflineEvaluationService = Depends(get_offline_evaluation_service),
+) -> EvalRunResult:
+    """Run offline evaluation against the current retrieval and generation stack."""
+
+    return service.run(limit=limit)
 
 
 @router.get("/prompts", response_model=list[PromptTemplate])

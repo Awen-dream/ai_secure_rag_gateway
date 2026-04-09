@@ -2,6 +2,7 @@ from functools import lru_cache
 
 from app.application.chat.orchestrator import ChatOrchestrator
 from app.application.context.builder import ContextBuilderService
+from app.application.evaluation.service import OfflineEvaluationService
 from app.application.generation.service import GenerationService
 from app.application.retrieval.llm_reranker import LLMReranker
 from app.application.prompting.builder import PromptBuilderService
@@ -32,6 +33,7 @@ from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue, DocumentIngestionWorker
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
+from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
 from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
 from app.infrastructure.vectorstore.pgvector import PGVectorStore
 
@@ -134,6 +136,13 @@ def get_document_source_store() -> LocalDocumentSourceStore:
 
 
 @lru_cache
+def get_eval_dataset_store() -> LocalEvalDatasetStore:
+    """Return the local evaluation dataset store used by offline evaluation tooling."""
+
+    return LocalEvalDatasetStore(settings.eval_dataset_path)
+
+
+@lru_cache
 def get_document_ingestion_orchestrator() -> DocumentIngestionOrchestrator:
     """Return the document ingestion orchestrator used by synchronous and background upload flows."""
 
@@ -220,6 +229,19 @@ def get_generation_service() -> GenerationService:
         prompt_template_service=get_prompt_template_service(),
         output_guard=get_output_guard(),
         openai_client=get_openai_client(),
+    )
+
+
+@lru_cache
+def get_offline_evaluation_service() -> OfflineEvaluationService:
+    """Return the offline evaluation service used by admin evaluation endpoints."""
+
+    return OfflineEvaluationService(
+        dataset_store=get_eval_dataset_store(),
+        retrieval_service=get_retrieval_service(),
+        context_builder=get_context_builder_service(),
+        prompt_builder=get_prompt_builder_service(),
+        generation_service=get_generation_service(),
     )
 
 
