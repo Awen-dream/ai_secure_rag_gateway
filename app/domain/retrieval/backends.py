@@ -30,6 +30,9 @@ class KeywordSearchBackend(Protocol):
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
         access_filter: AccessFilter | None = None,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
+        exact_terms: Sequence[str] | None = None,
     ) -> list[BackendSearchHit]:
         """Search keyword evidence from permission-filtered candidates."""
 
@@ -54,6 +57,8 @@ class VectorSearchBackend(Protocol):
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
         access_filter: AccessFilter | None = None,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
     ) -> list[BackendSearchHit]:
         """Search semantic evidence from permission-filtered candidates."""
 

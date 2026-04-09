@@ -64,6 +64,8 @@ class AuditService:
                         "vector_score": result.vector_score,
                         "matched_terms": result.matched_terms,
                         "retrieval_sources": result.retrieval_sources,
+                        "rerank_source": result.rerank_source,
+                        "rerank_notes": result.rerank_notes,
                         "security_level": result.chunk.security_level,
                     }
                     for result in retrieved

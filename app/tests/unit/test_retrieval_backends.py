@@ -67,6 +67,28 @@ class RetrievalBackendTest(unittest.TestCase):
         self.assertEqual(hits[0].backend, "pgvector")
         self.assertGreater(hits[0].score, 0)
 
+    def test_pgvector_sql_and_ddl_include_metadata_filters(self) -> None:
+        backend = PGVectorStore()
+        from app.application.access.service import build_access_filter
+        from app.domain.auth.models import UserContext
+
+        access_filter = build_access_filter(
+            UserContext(
+                user_id="u1",
+                tenant_id="t1",
+                department_id="engineering",
+                role="employee",
+                clearance_level=2,
+            )
+        )
+        ddl = backend.build_table_ddl()
+        sql = backend.build_search_sql(access_filter, 5, tag_filters=["finance"], year_filters=[2025])
+
+        self.assertIn("tags JSONB NOT NULL", ddl)
+        self.assertIn("created_at TIMESTAMPTZ NOT NULL", ddl)
+        self.assertIn("tags ?| %(tag_filters)s::text[]", sql)
+        self.assertIn("EXTRACT(YEAR FROM updated_at)", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

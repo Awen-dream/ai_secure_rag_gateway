@@ -457,15 +457,22 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
     def test_admin_can_view_backend_plan(self) -> None:
         es_response = self.client.get(
             "/api/v1/admin/retrieval/backends/elasticsearch/plan",
-            params={"query": "报销审批时限是什么", "top_k": 3},
+            params={"query": "请问 2025年 #finance 报销审批时限是什么", "top_k": 3},
             headers=self.headers,
         )
         self.assertEqual(es_response.status_code, 200)
         es_payload = es_response.json()
         self.assertEqual(es_payload["backend"], "elasticsearch")
         self.assertIn("access_filter", es_payload["artifacts"])
+        self.assertIn("query_plan", es_payload["artifacts"])
+        self.assertIn("recall_plan", es_payload["artifacts"])
         self.assertIn("mapping", es_payload["artifacts"])
         self.assertIn("search_body", es_payload["artifacts"])
+        search_body = es_payload["artifacts"]["search_body"]
+        self.assertIn("tags", es_payload["artifacts"]["mapping"]["mappings"]["properties"])
+        self.assertIn("updated_at", es_payload["artifacts"]["mapping"]["mappings"]["properties"])
+        self.assertIn("exact_match_terms", es_payload["artifacts"]["recall_plan"])
+        self.assertTrue(any("tags" in item.get("terms", {}) for item in search_body["query"]["bool"]["filter"]))
 
         pg_response = self.client.get(
             "/api/v1/admin/retrieval/backends/pgvector/plan",
@@ -476,9 +483,12 @@ class AdminRetrievalEndpointTest(unittest.TestCase):
         pg_payload = pg_response.json()
         self.assertEqual(pg_payload["backend"], "pgvector")
         self.assertIn("access_filter", pg_payload["artifacts"])
+        self.assertIn("query_plan", pg_payload["artifacts"])
+        self.assertIn("recall_plan", pg_payload["artifacts"])
         self.assertIn("ddl", pg_payload["artifacts"])
         self.assertIn("upsert_sql", pg_payload["artifacts"])
         self.assertIn("search_sql", pg_payload["artifacts"])
+        self.assertIn("tags JSONB NOT NULL", pg_payload["artifacts"]["ddl"])
 
     def test_admin_can_view_backend_health(self) -> None:
         es_response = self.client.get("/api/v1/admin/retrieval/backends/elasticsearch/health", headers=self.headers)

@@ -79,9 +79,26 @@ class RecallPlanningService:
     @staticmethod
     def _build_exact_match_terms(rewrite_plan) -> list[str]:
         terms: list[str] = []
+        rewritten = rewrite_plan.rewritten_query.lower()
         terms.extend(phrase.lower() for phrase in rewrite_plan.exact_phrases if phrase.strip())
-        terms.extend(term.lower() for term in rewrite_plan.keywords if len(term) >= 4)
-        return list(dict.fromkeys(terms))[:4]
+        terms.extend(
+            term.lower()
+            for term in rewrite_plan.expanded_terms
+            if 4 <= len(term) <= 12 and term.lower() in rewritten
+        )
+        terms.extend(
+            term.lower()
+            for term in rewrite_plan.keywords
+            if 4 <= len(term) <= 12 and term.lower() in rewritten
+        )
+        terms.extend(term.lower() for term in rewrite_plan.expanded_terms if 4 <= len(term) <= 24)
+        terms.extend(term.lower() for term in rewrite_plan.keywords if 4 <= len(term) <= 24)
+        filtered_terms = [
+            term
+            for term in terms
+            if not any(fragment in term for fragment in ["多少", "什么", "如何", "怎么", "是否"])
+        ]
+        return list(dict.fromkeys(filtered_terms))[:4]
 
     @staticmethod
     def _resolve_candidate_pool(profile: RetrievalProfile, rewrite_plan) -> int:

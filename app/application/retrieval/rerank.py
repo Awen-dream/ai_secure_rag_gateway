@@ -6,13 +6,13 @@ from datetime import datetime
 from app.application.retrieval.planning import RecallPlan
 from app.domain.retrieval.backends import BackendSearchHit
 from app.domain.retrieval.models import RetrievalProfile, RetrievalResult
-from app.domain.retrieval.rerankers import HeuristicReranker, sort_by_score, weighted_fusion
+from app.domain.retrieval.rerankers import RetrievalReranker, sort_by_score, weighted_fusion
 
 
 class RetrievalRerankService:
     """Prepare rerank candidates from multi-backend hits and run the configured reranker."""
 
-    def __init__(self, reranker: HeuristicReranker | None = None) -> None:
+    def __init__(self, reranker: RetrievalReranker | None = None) -> None:
         self.reranker = reranker
 
     def build_rerank_candidates(

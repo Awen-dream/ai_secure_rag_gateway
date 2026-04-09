@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from dataclasses import dataclass
+from typing import Protocol
 
 from app.application.query.rewrite import build_query_rewrite_plan
 from app.domain.retrieval.models import RetrievalResult
 from app.domain.retrieval.retrievers import normalize_terms
+
+
+class RetrievalReranker(Protocol):
+    """Pluggable reranker contract used by the retrieval rerank layer."""
+
+    def rerank(self, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
+        """Return the reranked candidate list for one retrieval query."""
 
 
 def sort_by_score(results: list[RetrievalResult]) -> list[RetrievalResult]:
@@ -75,6 +83,25 @@ class HeuristicReranker:
             )
             reranked.append(result)
         return sort_by_score(reranked)
+
+
+@dataclass(frozen=True)
+class CompositeReranker:
+    """Chain multiple rerankers while keeping the local heuristic path as a safe fallback."""
+
+    primary: RetrievalReranker
+    fallback: RetrievalReranker | None = None
+
+    def rerank(self, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
+        try:
+            reranked = self.primary.rerank(query, results)
+            if reranked:
+                return reranked
+        except Exception:
+            pass
+        if self.fallback is not None:
+            return self.fallback.rerank(query, results)
+        return results
 
 
 def _terms_appear_in_order(terms: list[str], text: str) -> bool:

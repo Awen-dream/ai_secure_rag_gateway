@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.application.access.service import build_access_filter
 from app.application.context.builder import ContextBuilderService
 from app.application.prompting.builder import PromptBuilderService
+from app.application.query.planning import QueryPlanningService
+from app.application.retrieval.planning import RecallPlanningService
 from app.api.deps import (
     get_audit_service,
     get_context_builder_service,
@@ -15,6 +18,8 @@ from app.api.deps import (
     get_keyword_backend,
     get_policy_engine,
     get_prompt_builder_service,
+    get_query_planning_service,
+    get_recall_planning_service,
     get_prompt_template_service,
     get_redis_client,
     get_retrieval_service,
@@ -179,23 +184,39 @@ def get_retrieval_backend_plan(
     user: UserContext = Depends(require_admin),
     keyword_backend: ElasticsearchSearch = Depends(get_keyword_backend),
     vector_backend: PGVectorStore = Depends(get_vector_backend),
+    query_planning: QueryPlanningService = Depends(get_query_planning_service),
+    recall_planning: RecallPlanningService = Depends(get_recall_planning_service),
 ) -> RetrievalBackendPlan:
     """Return backend-specific integration artifacts for debugging and deployment review."""
 
+    query_plan = query_planning.plan(query)
+    recall_plan = recall_planning.plan(query_plan, top_k=top_k)
+
     if backend == "elasticsearch":
-        terms = query.split()
         access_filter = build_access_filter(user)
         return RetrievalBackendPlan(
             backend="elasticsearch",
             execute_enabled=keyword_backend.can_execute(),
             artifacts={
                 "access_filter": access_filter.model_dump(),
+                "query_plan": asdict(query_plan),
+                "recall_plan": {
+                    "keyword_query": recall_plan.keyword_query,
+                    "keyword_terms": recall_plan.keyword_terms,
+                    "exact_match_terms": recall_plan.exact_match_terms,
+                    "tag_filters": recall_plan.filters.tag_filters,
+                    "year_filters": recall_plan.filters.year_filters,
+                    "candidate_pool": recall_plan.candidate_pool,
+                },
                 "mapping": keyword_backend.build_index_mapping(),
                 "search_body": keyword_backend.build_search_body(
-                    query=query,
+                    query=recall_plan.keyword_query,
                     access_filter=access_filter,
-                    terms=terms,
+                    terms=recall_plan.keyword_terms,
                     top_k=top_k,
+                    tag_filters=recall_plan.filters.tag_filters,
+                    year_filters=recall_plan.filters.year_filters,
+                    exact_terms=recall_plan.exact_match_terms,
                 ),
             },
         )
@@ -207,9 +228,21 @@ def get_retrieval_backend_plan(
             execute_enabled=vector_backend.can_execute(),
             artifacts={
                 "access_filter": access_filter.model_dump(),
+                "query_plan": asdict(query_plan),
+                "recall_plan": {
+                    "vector_query": recall_plan.vector_query,
+                    "tag_filters": recall_plan.filters.tag_filters,
+                    "year_filters": recall_plan.filters.year_filters,
+                    "candidate_pool": recall_plan.candidate_pool,
+                },
                 "ddl": vector_backend.build_table_ddl(),
                 "upsert_sql": vector_backend.build_upsert_sql(),
-                "search_sql": vector_backend.build_search_sql(access_filter, top_k),
+                "search_sql": vector_backend.build_search_sql(
+                    access_filter,
+                    top_k,
+                    tag_filters=recall_plan.filters.tag_filters,
+                    year_filters=recall_plan.filters.year_filters,
+                ),
             },
         )
 

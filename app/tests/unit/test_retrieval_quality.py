@@ -23,9 +23,25 @@ class _FakeKeywordBackend:
 
     def __init__(self):
         self.last_terms = []
+        self.last_tag_filters = []
+        self.last_year_filters = []
+        self.last_exact_terms = []
 
-    def search(self, query, terms, candidates, top_k, access_filter=None):
+    def search(
+        self,
+        query,
+        terms,
+        candidates,
+        top_k,
+        access_filter=None,
+        tag_filters=None,
+        year_filters=None,
+        exact_terms=None,
+    ):
         self.last_terms = list(terms)
+        self.last_tag_filters = list(tag_filters or [])
+        self.last_year_filters = list(year_filters or [])
+        self.last_exact_terms = list(exact_terms or [])
         return [
             BackendSearchHit(
                 document=document,
@@ -50,7 +66,7 @@ class _FakeKeywordBackend:
 class _FakeVectorBackend:
     backend_name = "pgvector"
 
-    def search(self, query, candidates, top_k, access_filter=None):
+    def search(self, query, candidates, top_k, access_filter=None, tag_filters=None, year_filters=None):
         return [
             BackendSearchHit(
                 document=document,
@@ -141,7 +157,11 @@ class RetrievalQualityTest(unittest.TestCase):
         self.assertIn("费用报销", explanation.expanded_terms)
         self.assertEqual(explanation.tag_filters, ["finance"])
         self.assertEqual(explanation.year_filters, [2025])
+        self.assertEqual(explanation.rerank_sources, [])
         self.assertIn("审批时限", keyword_backend.last_terms)
+        self.assertEqual(keyword_backend.last_tag_filters, ["finance"])
+        self.assertEqual(keyword_backend.last_year_filters, [2025])
+        self.assertIn("审批时限", keyword_backend.last_exact_terms)
 
     def test_explain_reuses_precomputed_understanding_and_rewrite_plan(self) -> None:
         finance_doc = _build_document("doc_finance", "报销制度", ["finance"], 2025)

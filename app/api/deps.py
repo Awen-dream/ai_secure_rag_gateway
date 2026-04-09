@@ -3,6 +3,7 @@ from functools import lru_cache
 from app.application.chat.orchestrator import ChatOrchestrator
 from app.application.context.builder import ContextBuilderService
 from app.application.generation.service import GenerationService
+from app.application.retrieval.llm_reranker import LLMReranker
 from app.application.prompting.builder import PromptBuilderService
 from app.application.retrieval.rerank import RetrievalRerankService
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
@@ -17,7 +18,7 @@ from app.domain.audit.services import AuditService
 from app.domain.documents.services import DocumentService
 from app.domain.prompts.template_service import PromptTemplateService
 from app.domain.retrieval.indexing import RetrievalIndexingService
-from app.domain.retrieval.rerankers import HeuristicReranker
+from app.domain.retrieval.rerankers import CompositeReranker, HeuristicReranker, RetrievalReranker
 from app.domain.retrieval.services import RetrievalService
 from app.domain.risk.output_guard import OutputGuard
 from app.domain.risk.rate_limit import RateLimitService
@@ -258,10 +259,23 @@ def get_embedding_client() -> OpenAIEmbeddingClient:
 
 
 @lru_cache
-def get_retrieval_reranker() -> HeuristicReranker:
-    """Return the low-level scoring reranker used inside the retrieval rerank layer."""
+def get_retrieval_reranker() -> RetrievalReranker:
+    """Return the configured reranker implementation used inside the retrieval rerank layer."""
 
-    return HeuristicReranker(mode=settings.reranker_mode, top_n=settings.reranker_top_n)
+    heuristic = HeuristicReranker(
+        mode="cross-encoder-fallback" if settings.reranker_mode != "disabled" else "disabled",
+        top_n=settings.reranker_top_n,
+    )
+    if settings.reranker_mode == "disabled":
+        return heuristic
+    if settings.reranker_mode == "llm":
+        return CompositeReranker(
+            primary=LLMReranker(client=get_openai_client(), top_n=settings.reranker_top_n),
+            fallback=heuristic,
+        )
+    if settings.reranker_mode == "heuristic":
+        return HeuristicReranker(mode="heuristic", top_n=settings.reranker_top_n)
+    return heuristic
 
 
 @lru_cache

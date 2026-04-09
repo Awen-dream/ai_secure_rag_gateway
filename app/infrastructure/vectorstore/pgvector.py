@@ -50,12 +50,21 @@ class PGVectorStore:
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
         access_filter: AccessFilter | None = None,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
     ) -> list[BackendSearchHit]:
         """Return semantic hits scored with a lightweight local similarity fallback."""
 
         if self.can_execute() and candidates:
             try:
-                return self._execute_search(query, candidates, top_k, access_filter)
+                return self._execute_search(
+                    query,
+                    candidates,
+                    top_k,
+                    access_filter,
+                    tag_filters=tag_filters,
+                    year_filters=year_filters,
+                )
             except Exception:
                 pass
 
@@ -194,6 +203,9 @@ CREATE TABLE IF NOT EXISTS {self.table_name} (
     current BOOLEAN NOT NULL,
     status TEXT NOT NULL,
     metadata_json JSONB NOT NULL,
+    tags JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
     embedding VECTOR({self.embedding_dimension}) NOT NULL
 );
 
@@ -209,10 +221,10 @@ ON {self.table_name} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1
         return f"""
 INSERT INTO {self.table_name} (
     chunk_id, doc_id, tenant_id, title, owner_id, section_name, content,
-    department_scope, visibility_scope, role_scope, security_level, current, status, metadata_json, embedding
+    department_scope, visibility_scope, role_scope, security_level, current, status, metadata_json, tags, created_at, updated_at, embedding
 ) VALUES (
     %(chunk_id)s, %(doc_id)s, %(tenant_id)s, %(title)s, %(owner_id)s, %(section_name)s, %(content)s,
-    %(department_scope)s::jsonb, %(visibility_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(current)s, %(status)s, %(metadata_json)s::jsonb, %(embedding)s::vector
+    %(department_scope)s::jsonb, %(visibility_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(current)s, %(status)s, %(metadata_json)s::jsonb, %(tags)s::jsonb, %(created_at)s, %(updated_at)s, %(embedding)s::vector
 )
 ON CONFLICT (chunk_id) DO UPDATE SET
     doc_id = EXCLUDED.doc_id,
@@ -228,6 +240,9 @@ ON CONFLICT (chunk_id) DO UPDATE SET
     current = EXCLUDED.current,
     status = EXCLUDED.status,
     metadata_json = EXCLUDED.metadata_json,
+    tags = EXCLUDED.tags,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at,
     embedding = EXCLUDED.embedding;
 """.strip()
 
@@ -259,14 +274,31 @@ ON CONFLICT (chunk_id) DO UPDATE SET
                 "current": document.current,
                 "status": document.status.value,
                 "metadata_json": json.dumps(chunk.metadata_json, ensure_ascii=False),
+                "tags": json.dumps([tag.lower() for tag in document.tags], ensure_ascii=False),
+                "created_at": document.created_at.isoformat(),
+                "updated_at": document.updated_at.isoformat(),
                 "embedding": self._to_pgvector_literal(embeddings[index]),
             }
             for index, chunk in enumerate(chunks)
         ]
 
-    def build_search_sql(self, access_filter: AccessFilter, top_k: int) -> str:
+    def build_search_sql(
+        self,
+        access_filter: AccessFilter,
+        top_k: int,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
+    ) -> str:
         """Return the SQL template for permission-aware pgvector search."""
 
+        extra_where = ""
+        if tag_filters:
+            extra_where += " AND tags ?| %(tag_filters)s::text[]"
+        if year_filters:
+            extra_where += (
+                " AND (EXTRACT(YEAR FROM updated_at) = ANY(%(year_filters)s::int[]) "
+                "OR EXTRACT(YEAR FROM created_at) = ANY(%(year_filters)s::int[]))"
+            )
         return f"""
 SELECT
     chunk_id,
@@ -283,9 +315,12 @@ SELECT
     current,
     status,
     metadata_json,
+    tags,
+    created_at,
+    updated_at,
     1 - (embedding <=> %(query_embedding)s::vector) AS similarity_score
 FROM {self.table_name}
-WHERE {access_filter.build_pgvector_where_clause()}
+WHERE {access_filter.build_pgvector_where_clause()}{extra_where}
 ORDER BY embedding <=> %(query_embedding)s
 LIMIT {top_k};
 """.strip()
@@ -320,6 +355,8 @@ LIMIT {top_k};
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
         access_filter: AccessFilter | None,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
     ) -> list[BackendSearchHit]:
         """Execute a real pgvector similarity query and map results back to allowed candidates."""
 
@@ -329,8 +366,10 @@ LIMIT {top_k};
             raise RuntimeError("Access filter is required for remote pgvector search.")
 
         candidate_lookup = {chunk.id: (document, chunk) for document, chunk in candidates}
-        sql = self.build_search_sql(access_filter, top_k)
+        sql = self.build_search_sql(access_filter, top_k, tag_filters=tag_filters, year_filters=year_filters)
         params = access_filter.build_pgvector_params(list(candidate_lookup.keys()))
+        params["tag_filters"] = [tag.lower() for tag in tag_filters or []]
+        params["year_filters"] = list(year_filters or [])
         params["query_embedding"] = self._to_pgvector_literal(
             self._embed_text(query, use_runtime_embeddings=self.can_execute())
         )

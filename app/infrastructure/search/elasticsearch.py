@@ -41,12 +41,24 @@ class ElasticsearchSearch:
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
         access_filter: AccessFilter | None = None,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
+        exact_terms: Sequence[str] | None = None,
     ) -> list[BackendSearchHit]:
         """Return keyword-oriented hits using title and body term matching."""
 
         if self.can_execute() and candidates:
             try:
-                return self._remote_search(query, terms, candidates, top_k, access_filter)
+                return self._remote_search(
+                    query,
+                    terms,
+                    candidates,
+                    top_k,
+                    access_filter,
+                    tag_filters=tag_filters,
+                    year_filters=year_filters,
+                    exact_terms=exact_terms,
+                )
             except Exception:
                 pass
 
@@ -208,6 +220,9 @@ class ElasticsearchSearch:
                     "security_level": {"type": "integer"},
                     "current": {"type": "boolean"},
                     "status": {"type": "keyword"},
+                    "tags": {"type": "keyword"},
+                    "created_at": {"type": "date"},
+                    "updated_at": {"type": "date"},
                     "metadata_json": {"type": "object", "enabled": True},
                 }
             },
@@ -235,6 +250,9 @@ class ElasticsearchSearch:
                         "security_level": chunk.security_level,
                         "current": document.current,
                         "status": document.status.value,
+                        "tags": [tag.lower() for tag in document.tags],
+                        "created_at": document.created_at.isoformat(),
+                        "updated_at": document.updated_at.isoformat(),
                         "metadata_json": chunk.metadata_json,
                     },
                     ensure_ascii=False,
@@ -249,21 +267,44 @@ class ElasticsearchSearch:
         terms: Sequence[str],
         top_k: int,
         allowed_chunk_ids: Sequence[str] | None = None,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
+        exact_terms: Sequence[str] | None = None,
     ) -> dict:
         """Build the Elasticsearch DSL body for a permission-aware keyword search."""
 
         should_clauses = [
             {"match": {"title": {"query": query, "boost": 3}}},
+            {"match": {"section_name": {"query": query, "boost": 2}}},
             {"match": {"content": {"query": query, "boost": 1}}},
         ]
         for term in terms[:8]:
             should_clauses.append({"term": {"title": {"value": term, "boost": 2}}})
+            should_clauses.append({"term": {"tags": {"value": term, "boost": 1.2}}})
+        for phrase in list(exact_terms or [])[:4]:
+            should_clauses.append({"match_phrase": {"title": {"query": phrase, "boost": 4}}})
+            should_clauses.append({"match_phrase": {"section_name": {"query": phrase, "boost": 2.5}}})
+            should_clauses.append({"match_phrase": {"content": {"query": phrase, "boost": 2}}})
+
+        filters = access_filter.build_elasticsearch_filters(list(allowed_chunk_ids or []))
+        if tag_filters:
+            filters.append({"terms": {"tags": [tag.lower() for tag in tag_filters]}})
+        if year_filters:
+            year_should = []
+            for year in year_filters:
+                year_should.extend(
+                    [
+                        {"range": {"updated_at": {"gte": f"{year}-01-01", "lt": f"{year + 1}-01-01"}}},
+                        {"range": {"created_at": {"gte": f"{year}-01-01", "lt": f"{year + 1}-01-01"}}},
+                    ]
+                )
+            filters.append({"bool": {"should": year_should, "minimum_should_match": 1}})
 
         return {
             "size": top_k,
             "query": {
                 "bool": {
-                    "filter": access_filter.build_elasticsearch_filters(list(allowed_chunk_ids or [])),
+                    "filter": filters,
                     "should": should_clauses,
                     "minimum_should_match": 1,
                 }
@@ -277,6 +318,9 @@ class ElasticsearchSearch:
         candidates: Sequence[tuple[DocumentRecord, DocumentChunk]],
         top_k: int,
         access_filter: AccessFilter | None,
+        tag_filters: Sequence[str] | None = None,
+        year_filters: Sequence[int] | None = None,
+        exact_terms: Sequence[str] | None = None,
     ) -> list[BackendSearchHit]:
         """Execute a real Elasticsearch search and map results back to permission-filtered candidates."""
 
@@ -289,6 +333,9 @@ class ElasticsearchSearch:
             terms=terms,
             top_k=top_k,
             allowed_chunk_ids=list(candidate_lookup.keys()),
+            tag_filters=tag_filters,
+            year_filters=year_filters,
+            exact_terms=exact_terms,
         )
         payload = self._request_json("POST", f"/{self.index_name}/_search", body)
         hits: list[BackendSearchHit] = []

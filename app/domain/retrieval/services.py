@@ -9,7 +9,7 @@ from app.domain.auth.models import UserContext
 from app.domain.documents.services import DocumentService
 from app.domain.retrieval.backends import KeywordSearchBackend, VectorSearchBackend
 from app.domain.retrieval.models import RetrievalBackendInfo, RetrievalExplainResponse, RetrievalResult
-from app.domain.retrieval.rerankers import HeuristicReranker, sort_by_score
+from app.domain.retrieval.rerankers import RetrievalReranker, sort_by_score
 
 
 class RetrievalService:
@@ -21,7 +21,7 @@ class RetrievalService:
         keyword_backend: KeywordSearchBackend,
         vector_backend: VectorSearchBackend,
         retrieval_cache: RetrievalCache | None = None,
-        reranker: HeuristicReranker | None = None,
+        reranker: RetrievalReranker | None = None,
         query_planning: QueryPlanningService | None = None,
         recall_planning: RecallPlanningService | None = None,
         rerank_service: RetrievalRerankService | None = None,
@@ -91,6 +91,10 @@ class RetrievalService:
             tag_filters=rewrite_plan.tag_filters,
             year_filters=rewrite_plan.year_filters,
             recency_hint=rewrite_plan.recency_hint,
+            rerank_sources=list(dict.fromkeys(result.rerank_source for result in results if result.rerank_source)),
+            rerank_notes=list(
+                dict.fromkeys(note for result in results for note in result.rerank_notes if note)
+            )[:5],
             profile=recall_plan.profile,
             results=sort_by_score(results)[: recall_plan.result_limit],
         )
@@ -129,12 +133,17 @@ class RetrievalService:
             candidates=candidates,
             top_k=recall_plan.candidate_pool,
             access_filter=access_filter,
+            tag_filters=recall_plan.filters.tag_filters,
+            year_filters=recall_plan.filters.year_filters,
+            exact_terms=recall_plan.exact_match_terms,
         )
         vector_hits = self.vector_backend.search(
             query=recall_plan.vector_query,
             candidates=candidates,
             top_k=recall_plan.candidate_pool,
             access_filter=access_filter,
+            tag_filters=recall_plan.filters.tag_filters,
+            year_filters=recall_plan.filters.year_filters,
         )
         rerank_candidates = self.rerank_service.build_rerank_candidates(keyword_hits, vector_hits, recall_plan)
         return self.rerank_service.rerank_results(rerank_candidates, recall_plan)

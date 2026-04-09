@@ -24,6 +24,8 @@ class RetrievalResult(BaseModel):
     vector_score: float = 0.0
     matched_terms: List[str] = Field(default_factory=list)
     retrieval_sources: List[str] = Field(default_factory=list)
+    rerank_source: str = ""
+    rerank_notes: List[str] = Field(default_factory=list)
 
 
 class RetrievalBackendInfo(BaseModel):
@@ -59,6 +61,8 @@ class RetrievalExplainResponse(BaseModel):
     tag_filters: List[str] = Field(default_factory=list)
     year_filters: List[int] = Field(default_factory=list)
     recency_hint: bool = False
+    rerank_sources: List[str] = Field(default_factory=list)
+    rerank_notes: List[str] = Field(default_factory=list)
     profile: RetrievalProfile
     results: List[RetrievalResult] = Field(default_factory=list)
 

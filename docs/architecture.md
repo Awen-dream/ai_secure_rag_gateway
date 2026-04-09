@@ -71,6 +71,7 @@
    - `app/infrastructure/vectorstore/pgvector.py`
 5. `Rerank`
    - `app/application/retrieval/rerank.py`
+   - `app/application/retrieval/llm_reranker.py`
    - `app/domain/retrieval/rerankers.py`
 6. `Context Assembly`
    - `app/application/context/builder.py`
@@ -93,8 +94,15 @@
   - 用于把上游结果组装成下游可消费对象，例如 `ContextBuilderService`、`PromptBuilderService`
 - `*RerankService`
   - 用于多路候选结果的融合、打分和重排编排
+- `*Reranker`
+  - 用于具体重排引擎实现，例如 `HeuristicReranker`、`LLMReranker`
 - `*TemplateService`
   - 用于模板生命周期和模板级校验
+
+## Retrieval Notes
+
+- Elasticsearch keyword plan 现在会下沉 `tag/year/exact phrase` 等过滤和 boost 信号，而不是只在内存候选集上处理。
+- Rerank 层支持可插拔引擎，当前包含本地 heuristic/cross-encoder-fallback 路径，以及基于 OpenAI 的 `LLMReranker`。
 
 ## Current Canonical Paths
 
