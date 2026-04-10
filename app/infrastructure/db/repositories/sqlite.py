@@ -50,6 +50,10 @@ class SQLiteRepository:
                     security_level INTEGER NOT NULL,
                     version INTEGER NOT NULL,
                     status TEXT NOT NULL,
+                    lifecycle_status TEXT NOT NULL DEFAULT 'active',
+                    replaced_by_doc_id TEXT,
+                    source_last_seen_at TEXT,
+                    lifecycle_reason TEXT,
                     last_error TEXT,
                     content_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -210,6 +214,14 @@ class SQLiteRepository:
                 connection.execute("ALTER TABLE documents ADD COLUMN source_document_id TEXT")
             if "source_document_version" not in existing_document_columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN source_document_version TEXT")
+            if "lifecycle_status" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active'")
+            if "replaced_by_doc_id" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN replaced_by_doc_id TEXT")
+            if "source_last_seen_at" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN source_last_seen_at TEXT")
+            if "lifecycle_reason" not in existing_document_columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN lifecycle_reason TEXT")
             existing_sync_job_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(source_sync_jobs)").fetchall()
             }
@@ -322,9 +334,10 @@ class SQLiteRepository:
                 """
                 INSERT OR REPLACE INTO documents (
                     id, tenant_id, title, source_type, source_uri, source_connector, source_document_id, source_document_version,
-                    owner_id, department_scope, visibility_scope, security_level, version, status, last_error, content_hash,
+                    owner_id, department_scope, visibility_scope, security_level, version, status, lifecycle_status,
+                    replaced_by_doc_id, source_last_seen_at, lifecycle_reason, last_error, content_hash,
                     created_at, updated_at, tags, current
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document.id,
@@ -341,6 +354,10 @@ class SQLiteRepository:
                     document.security_level,
                     document.version,
                     document.status.value,
+                    document.lifecycle_status.value,
+                    document.replaced_by_doc_id,
+                    document.source_last_seen_at.isoformat() if document.source_last_seen_at else None,
+                    document.lifecycle_reason,
                     document.last_error,
                     document.content_hash,
                     document.created_at.isoformat(),
@@ -381,11 +398,16 @@ class SQLiteRepository:
             connection.execute(
                 """
                 UPDATE documents
-                SET status = ?, last_error = ?, updated_at = ?, current = ?, security_level = ?, department_scope = ?, visibility_scope = ?, tags = ?
+                SET status = ?, lifecycle_status = ?, replaced_by_doc_id = ?, source_last_seen_at = ?, lifecycle_reason = ?,
+                    last_error = ?, updated_at = ?, current = ?, security_level = ?, department_scope = ?, visibility_scope = ?, tags = ?
                 WHERE id = ?
                 """,
                 (
                     document.status.value,
+                    document.lifecycle_status.value,
+                    document.replaced_by_doc_id,
+                    document.source_last_seen_at.isoformat() if document.source_last_seen_at else None,
+                    document.lifecycle_reason,
                     document.last_error,
                     document.updated_at.isoformat(),
                     int(document.current),
@@ -411,6 +433,25 @@ class SQLiteRepository:
         query += " ORDER BY created_at DESC"
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
+        return [self._row_to_document(row) for row in rows]
+
+    def list_stale_documents(
+        self,
+        tenant_id: Optional[str] = None,
+        *,
+        missing_after: Optional[datetime] = None,
+    ) -> list[DocumentRecord]:
+        query = "SELECT * FROM documents WHERE current = 1"
+        params: list = []
+        if tenant_id:
+            query += " AND tenant_id = ?"
+            params.append(tenant_id)
+        if missing_after is not None:
+            query += " AND source_last_seen_at IS NOT NULL AND source_last_seen_at <= ?"
+            params.append(missing_after.isoformat())
+        query += " ORDER BY updated_at DESC"
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
         return [self._row_to_document(row) for row in rows]
 
     def list_chunks_for_document(self, doc_id: str) -> list[DocumentChunk]:
@@ -718,6 +759,10 @@ class SQLiteRepository:
             security_level=row["security_level"],
             version=row["version"],
             status=row["status"],
+            lifecycle_status=row["lifecycle_status"],
+            replaced_by_doc_id=row["replaced_by_doc_id"],
+            source_last_seen_at=self._to_datetime(row["source_last_seen_at"]) if row["source_last_seen_at"] else None,
+            lifecycle_reason=row["lifecycle_reason"],
             last_error=row["last_error"],
             content_hash=row["content_hash"],
             created_at=self._to_datetime(row["created_at"]),

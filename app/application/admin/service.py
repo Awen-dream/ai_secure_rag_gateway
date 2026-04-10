@@ -6,7 +6,7 @@ from typing import Optional
 
 from app.application.evaluation.service import OfflineEvaluationService
 from app.domain.audit.services import AuditService
-from app.domain.documents.models import DocumentRecord, DocumentStatus
+from app.domain.documents.models import DocumentLifecycleStatus, DocumentRecord, DocumentStatus
 from app.domain.documents.services import DocumentService
 from app.domain.evaluation.models import EvalSample
 from app.domain.prompts.template_service import PromptTemplateService
@@ -191,6 +191,46 @@ class AdminConsoleService:
 
         document = self.document_service.retire_document_system(doc_id, reason=reason)
         return document.model_dump(mode="json")
+
+    def deprecate_document(self, doc_id: str, reason: str = "deprecated by admin console") -> dict:
+        """Mark one document deprecated without deleting its history."""
+
+        document = self.document_service.deprecate_document_system(doc_id, reason=reason)
+        return document.model_dump(mode="json")
+
+    def replace_document(self, doc_id: str, replaced_by_doc_id: str, reason: str) -> dict:
+        """Link one document to its replacement and deprecate the old snapshot."""
+
+        document = self.document_service.replace_document_system(doc_id, replaced_by_doc_id, reason=reason)
+        return document.model_dump(mode="json")
+
+    def restore_document(
+        self,
+        doc_id: str,
+        reason: str = "restored by admin console",
+        source_last_seen_at: Optional[datetime] = None,
+    ) -> dict:
+        """Restore one document to active lifecycle state."""
+
+        document = self.document_service.restore_document_system(
+            doc_id,
+            reason=reason,
+            source_last_seen_at=source_last_seen_at,
+        )
+        return document.model_dump(mode="json")
+
+    def list_stale_documents(self, tenant_id: Optional[str] = None, threshold_days: int = 30) -> list[dict]:
+        """Return stale documents whose source_last_seen_at is older than the threshold."""
+
+        documents = self.document_service.list_stale_documents_system(tenant_id, threshold_days=threshold_days)
+        return [
+            {
+                **document.model_dump(mode="json"),
+                "chunk_count": len(self.repository.list_chunks_for_document(document.id)),
+            }
+            for document in documents
+            if document.lifecycle_status in {DocumentLifecycleStatus.ACTIVE, DocumentLifecycleStatus.DEPRECATED}
+        ]
 
     def replace_evaluation_dataset(self, samples: list[EvalSample]) -> dict:
         """Replace the evaluation dataset with the provided samples."""

@@ -18,6 +18,12 @@ class DocumentStatus(str, Enum):
     RETIRED = "retired"
 
 
+class DocumentLifecycleStatus(str, Enum):
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    RETIRED = "retired"
+
+
 class DocumentRecord(BaseModel):
     id: str
     tenant_id: str
@@ -33,6 +39,10 @@ class DocumentRecord(BaseModel):
     security_level: int
     version: int = 1
     status: DocumentStatus = DocumentStatus.PENDING
+    lifecycle_status: DocumentLifecycleStatus = DocumentLifecycleStatus.ACTIVE
+    replaced_by_doc_id: Optional[str] = None
+    source_last_seen_at: Optional[datetime] = None
+    lifecycle_reason: Optional[str] = None
     last_error: Optional[str] = None
     content_hash: str
     created_at: datetime

@@ -82,6 +82,7 @@ class FeishuSourceSyncService:
         else:
             document = self.ingestion_orchestrator.process_document(document.id)
             task_receipt = None
+        self.document_service.touch_source_last_seen_system(document.id)
         sync_action = self._resolve_sync_action(previous_current, document)
         return FeishuImportResponse(
             source=payload.source,

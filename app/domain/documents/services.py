@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.application.access.service import build_access_filter
 from app.application.ingestion.orchestrator import DocumentIngestionOrchestrator
 from app.domain.auth.models import UserContext
-from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
+from app.domain.documents.models import DocumentChunk, DocumentLifecycleStatus, DocumentRecord, DocumentStatus
 from app.domain.documents.schemas import DocumentUploadRequest
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.infrastructure.db.repositories.base import MetadataRepository
@@ -112,6 +112,10 @@ class DocumentService:
             security_level=payload.security_level,
             version=version,
             status=DocumentStatus.PENDING,
+            lifecycle_status=DocumentLifecycleStatus.ACTIVE,
+            replaced_by_doc_id=None,
+            source_last_seen_at=now if source_connector and source_document_id else None,
+            lifecycle_reason=None,
             last_error=None,
             content_hash=content_hash,
             created_at=now,
@@ -133,7 +137,7 @@ class DocumentService:
         return [
             document
             for document in self.repository.list_documents(user.tenant_id)
-            if access_filter.allows_document(document)
+            if access_filter.allows_document(document) and document.lifecycle_status == DocumentLifecycleStatus.ACTIVE
         ]
 
     def reindex_document(self, doc_id: str, user: UserContext) -> DocumentRecord:
@@ -179,6 +183,8 @@ class DocumentService:
         chunks = self.repository.list_chunks_for_document(document.id)
         document.current = False
         document.status = DocumentStatus.RETIRED
+        document.lifecycle_status = DocumentLifecycleStatus.RETIRED
+        document.lifecycle_reason = reason
         document.last_error = reason
         document.updated_at = utcnow()
         self.repository.update_document(document)
@@ -199,6 +205,91 @@ class DocumentService:
             raise PermissionError(doc_id)
         return document
 
+    def deprecate_document_system(self, doc_id: str, reason: str) -> DocumentRecord:
+        """Mark one document as deprecated so it stays auditable but stops participating in active retrieval."""
+
+        document = self.repository.get_document(doc_id)
+        if not document:
+            raise KeyError(doc_id)
+        chunks = self.repository.list_chunks_for_document(document.id)
+        document.lifecycle_status = DocumentLifecycleStatus.DEPRECATED
+        document.lifecycle_reason = reason
+        document.current = False
+        document.updated_at = utcnow()
+        self.repository.update_document(document)
+        if self.indexing_service:
+            self.indexing_service.delete_document(document, chunks)
+        return document
+
+    def restore_document_system(
+        self,
+        doc_id: str,
+        reason: str = "restored by admin console",
+        source_last_seen_at: Optional[datetime] = None,
+    ) -> DocumentRecord:
+        """Restore one document back to active lifecycle state."""
+
+        document = self.repository.get_document(doc_id)
+        if not document:
+            raise KeyError(doc_id)
+        document.lifecycle_status = DocumentLifecycleStatus.ACTIVE
+        document.lifecycle_reason = reason
+        document.replaced_by_doc_id = None
+        if document.status == DocumentStatus.RETIRED:
+            document.status = DocumentStatus.SUCCESS
+        document.current = True
+        if source_last_seen_at is not None:
+            document.source_last_seen_at = source_last_seen_at
+        document.updated_at = utcnow()
+        self.repository.update_document(document)
+        if self.indexing_service:
+            self.indexing_service.upsert_document(document, self.repository.list_chunks_for_document(document.id))
+        return document
+
+    def replace_document_system(self, doc_id: str, replaced_by_doc_id: str, reason: str) -> DocumentRecord:
+        """Link one document to its replacement and mark it deprecated."""
+
+        document = self.repository.get_document(doc_id)
+        replacement = self.repository.get_document(replaced_by_doc_id)
+        if not document:
+            raise KeyError(doc_id)
+        if not replacement:
+            raise KeyError(replaced_by_doc_id)
+        if document.tenant_id != replacement.tenant_id:
+            raise ValueError("Replacement document must belong to the same tenant.")
+        chunks = self.repository.list_chunks_for_document(document.id)
+        document.lifecycle_status = DocumentLifecycleStatus.DEPRECATED
+        document.replaced_by_doc_id = replaced_by_doc_id
+        document.lifecycle_reason = reason
+        document.current = False
+        document.updated_at = utcnow()
+        self.repository.update_document(document)
+        if self.indexing_service:
+            self.indexing_service.delete_document(document, chunks)
+        return document
+
+    def touch_source_last_seen_system(self, doc_id: str, seen_at: Optional[datetime] = None) -> DocumentRecord:
+        """Refresh the source_last_seen_at marker for one externally synced document."""
+
+        document = self.repository.get_document(doc_id)
+        if not document:
+            raise KeyError(doc_id)
+        document.source_last_seen_at = seen_at or utcnow()
+        document.updated_at = utcnow()
+        self.repository.update_document(document)
+        return document
+
+    def list_stale_documents_system(self, tenant_id: Optional[str], threshold_days: int = 30) -> list[DocumentRecord]:
+        """Return documents whose last source sighting is older than the supplied threshold."""
+
+        cutoff = utcnow() - timedelta(days=max(threshold_days, 1))
+        documents = self.repository.list_stale_documents(tenant_id, missing_after=cutoff)
+        return [
+            document
+            for document in documents
+            if document.lifecycle_status != DocumentLifecycleStatus.RETIRED
+        ]
+
     def get_accessible_chunks(self, user: UserContext) -> list[tuple[DocumentRecord, DocumentChunk]]:
         """Return only those chunks that are allowed to participate in retrieval."""
 
@@ -210,6 +301,8 @@ class DocumentService:
             if not document:
                 continue
             if not access_filter.allows_document(document):
+                continue
+            if document.lifecycle_status != DocumentLifecycleStatus.ACTIVE:
                 continue
             if access_filter.allows_chunk(chunk):
                 results.append((document, chunk))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional, Protocol
 
 from app.domain.audit.models import AuditLog
@@ -45,6 +46,14 @@ class MetadataRepository(Protocol):
         ...
 
     def list_documents(self, tenant_id: Optional[str] = None) -> list[DocumentRecord]:
+        ...
+
+    def list_stale_documents(
+        self,
+        tenant_id: Optional[str] = None,
+        *,
+        missing_after: Optional[datetime] = None,
+    ) -> list[DocumentRecord]:
         ...
 
     def list_chunks_for_document(self, doc_id: str) -> list[DocumentChunk]:

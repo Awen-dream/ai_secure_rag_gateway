@@ -202,6 +202,10 @@ CREATE TABLE IF NOT EXISTS {self.table_name} (
     security_level INTEGER NOT NULL,
     current BOOLEAN NOT NULL,
     status TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    replaced_by_doc_id TEXT,
+    source_last_seen_at TIMESTAMPTZ,
+    lifecycle_reason TEXT,
     metadata_json JSONB NOT NULL,
     tags JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
@@ -221,10 +225,14 @@ ON {self.table_name} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1
         return f"""
 INSERT INTO {self.table_name} (
     chunk_id, doc_id, tenant_id, title, owner_id, section_name, content,
-    department_scope, visibility_scope, role_scope, security_level, current, status, metadata_json, tags, created_at, updated_at, embedding
+    department_scope, visibility_scope, role_scope, security_level, current, status,
+    lifecycle_status, replaced_by_doc_id, source_last_seen_at, lifecycle_reason,
+    metadata_json, tags, created_at, updated_at, embedding
 ) VALUES (
     %(chunk_id)s, %(doc_id)s, %(tenant_id)s, %(title)s, %(owner_id)s, %(section_name)s, %(content)s,
-    %(department_scope)s::jsonb, %(visibility_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(current)s, %(status)s, %(metadata_json)s::jsonb, %(tags)s::jsonb, %(created_at)s, %(updated_at)s, %(embedding)s::vector
+    %(department_scope)s::jsonb, %(visibility_scope)s::jsonb, %(role_scope)s::jsonb, %(security_level)s, %(current)s, %(status)s,
+    %(lifecycle_status)s, %(replaced_by_doc_id)s, %(source_last_seen_at)s, %(lifecycle_reason)s,
+    %(metadata_json)s::jsonb, %(tags)s::jsonb, %(created_at)s, %(updated_at)s, %(embedding)s::vector
 )
 ON CONFLICT (chunk_id) DO UPDATE SET
     doc_id = EXCLUDED.doc_id,
@@ -239,6 +247,10 @@ ON CONFLICT (chunk_id) DO UPDATE SET
     security_level = EXCLUDED.security_level,
     current = EXCLUDED.current,
     status = EXCLUDED.status,
+    lifecycle_status = EXCLUDED.lifecycle_status,
+    replaced_by_doc_id = EXCLUDED.replaced_by_doc_id,
+    source_last_seen_at = EXCLUDED.source_last_seen_at,
+    lifecycle_reason = EXCLUDED.lifecycle_reason,
     metadata_json = EXCLUDED.metadata_json,
     tags = EXCLUDED.tags,
     created_at = EXCLUDED.created_at,
@@ -273,6 +285,10 @@ ON CONFLICT (chunk_id) DO UPDATE SET
                 "security_level": chunk.security_level,
                 "current": document.current,
                 "status": document.status.value,
+                "lifecycle_status": document.lifecycle_status.value,
+                "replaced_by_doc_id": document.replaced_by_doc_id,
+                "source_last_seen_at": document.source_last_seen_at.isoformat() if document.source_last_seen_at else None,
+                "lifecycle_reason": document.lifecycle_reason,
                 "metadata_json": json.dumps(chunk.metadata_json, ensure_ascii=False),
                 "tags": json.dumps([tag.lower() for tag in document.tags], ensure_ascii=False),
                 "created_at": document.created_at.isoformat(),
@@ -314,6 +330,10 @@ SELECT
     security_level,
     current,
     status,
+    lifecycle_status,
+    replaced_by_doc_id,
+    source_last_seen_at,
+    lifecycle_reason,
     metadata_json,
     tags,
     created_at,

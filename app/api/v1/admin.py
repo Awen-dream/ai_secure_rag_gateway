@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from dataclasses import asdict
 from typing import Optional
 
@@ -32,6 +33,12 @@ from app.api.deps import (
 from app.core.security import require_admin
 from app.domain.auth.models import UserContext
 from app.domain.audit.services import AuditService
+from app.domain.documents.admin_schemas import (
+    DocumentLifecycleUpdateRequest,
+    DocumentReplaceRequest,
+    DocumentRestoreRequest,
+    DocumentStaleQueryResponse,
+)
 from app.domain.evaluation.models import (
     EvalBulkAnnotationRequest,
     EvalBulkAnnotationResult,
@@ -488,6 +495,71 @@ def retire_admin_document(
         return service.retire_document(doc_id, reason=reason)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.") from exc
+
+
+@router.post("/documents/{doc_id}/deprecate")
+def deprecate_admin_document(
+    doc_id: str,
+    payload: DocumentLifecycleUpdateRequest,
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Mark one document deprecated so it stops serving as active knowledge."""
+
+    try:
+        return service.deprecate_document(doc_id, reason=payload.reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.") from exc
+
+
+@router.post("/documents/{doc_id}/replace")
+def replace_admin_document(
+    doc_id: str,
+    payload: DocumentReplaceRequest,
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Link one document to a newer replacement and deprecate the old one."""
+
+    try:
+        return service.replace_document(doc_id, payload.replaced_by_doc_id, reason=payload.reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/documents/{doc_id}/restore")
+def restore_admin_document(
+    doc_id: str,
+    payload: DocumentRestoreRequest,
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> dict:
+    """Restore one deprecated or retired document back to active lifecycle state."""
+
+    try:
+        seen_at = datetime.fromisoformat(payload.source_last_seen_at) if payload.source_last_seen_at else None
+        return service.restore_document(doc_id, reason=payload.reason, source_last_seen_at=seen_at)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/documents/stale", response_model=DocumentStaleQueryResponse)
+def list_stale_admin_documents(
+    tenant_id: Optional[str] = None,
+    threshold_days: int = Query(30, ge=1, le=3650),
+    _: UserContext = Depends(require_admin),
+    service: AdminConsoleService = Depends(get_admin_console_service),
+) -> DocumentStaleQueryResponse:
+    """List documents that have not been seen from their external source within the threshold."""
+
+    return DocumentStaleQueryResponse(
+        threshold_days=threshold_days,
+        documents=service.list_stale_documents(tenant_id=tenant_id, threshold_days=threshold_days),
+    )
 
 
 @router.get("/retrieval/backends", response_model=list[RetrievalBackendInfo])

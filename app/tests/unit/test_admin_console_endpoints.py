@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -312,6 +313,102 @@ class AdminConsoleEndpointTest(unittest.TestCase):
         gate_payload = gate.json()
         self.assertIn("checks", gate_payload)
         self.assertIn("release_readiness", gate_payload)
+
+    def test_admin_can_manage_document_lifecycle(self) -> None:
+        original = self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "网关方案",
+                "content": "旧版网关方案说明。",
+                "source_connector": "feishu",
+                "source_document_id": "doc_gateway_plan",
+                "source_document_version": "v1",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        replacement = self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "网关方案",
+                "content": "新版网关方案说明。",
+                "source_connector": "feishu",
+                "source_document_id": "doc_gateway_plan_v2",
+                "source_document_version": "v2",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(original.status_code, 200)
+        self.assertEqual(replacement.status_code, 200)
+        old_doc_id = original.json()["id"]
+        new_doc_id = replacement.json()["id"]
+
+        replaced = self.client.post(
+            f"/api/v1/admin/documents/{old_doc_id}/replace",
+            json={"replaced_by_doc_id": new_doc_id, "reason": "新版方案已上线"},
+            headers=self.headers,
+        )
+        self.assertEqual(replaced.status_code, 200)
+        replaced_payload = replaced.json()
+        self.assertEqual(replaced_payload["lifecycle_status"], "deprecated")
+        self.assertEqual(replaced_payload["replaced_by_doc_id"], new_doc_id)
+
+        visible_docs = self.client.get("/api/v1/docs", headers=self.headers)
+        self.assertEqual(visible_docs.status_code, 200)
+        visible_ids = {item["id"] for item in visible_docs.json()}
+        self.assertIn(new_doc_id, visible_ids)
+        self.assertNotIn(old_doc_id, visible_ids)
+
+        restored = self.client.post(
+            f"/api/v1/admin/documents/{old_doc_id}/restore",
+            json={"reason": "历史方案恢复查看"},
+            headers=self.headers,
+        )
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()["lifecycle_status"], "active")
+
+        deprecated = self.client.post(
+            f"/api/v1/admin/documents/{new_doc_id}/deprecate",
+            json={"reason": "新版方案待修订"},
+            headers=self.headers,
+        )
+        self.assertEqual(deprecated.status_code, 200)
+        self.assertEqual(deprecated.json()["lifecycle_status"], "deprecated")
+
+    def test_admin_can_list_stale_documents(self) -> None:
+        created = self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "飞书制度",
+                "content": "飞书制度内容。",
+                "source_connector": "feishu",
+                "source_document_id": "doc_policy_1",
+                "source_document_version": "v1",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 200)
+        doc_id = created.json()["id"]
+
+        from app.api.deps import get_repository
+
+        repository = get_repository()
+        document = repository.get_document(doc_id)
+        assert document is not None
+        document.source_last_seen_at = datetime.utcnow() - timedelta(days=45)
+        repository.update_document(document)
+
+        stale = self.client.get("/api/v1/admin/documents/stale?threshold_days=30", headers=self.headers)
+        self.assertEqual(stale.status_code, 200)
+        stale_payload = stale.json()
+        self.assertEqual(stale_payload["threshold_days"], 30)
+        stale_ids = {item["id"] for item in stale_payload["documents"]}
+        self.assertIn(doc_id, stale_ids)
 
 
 if __name__ == "__main__":

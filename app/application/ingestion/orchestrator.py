@@ -6,7 +6,7 @@ from datetime import datetime
 from app.application.ingestion.document_parser import extract_text_from_bytes
 from app.application.ingestion.pipelines import chunk_document
 from app.application.query.retrieval_cache import RetrievalCache
-from app.domain.documents.models import DocumentChunk, DocumentRecord, DocumentStatus
+from app.domain.documents.models import DocumentChunk, DocumentLifecycleStatus, DocumentRecord, DocumentStatus
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.storage.local_source_store import LocalDocumentSourceStore
@@ -69,13 +69,14 @@ class DocumentIngestionOrchestrator:
             self._update_document_status(document, DocumentStatus.EMBEDDING)
             self._update_document_status(document, DocumentStatus.INDEXING)
 
-            previous_ids = self._resolve_previous_ids(document)
+            previous_records = self._resolve_previous_records(document)
 
             document.status = DocumentStatus.SUCCESS
             document.last_error = None
             document.current = True
             document.updated_at = utcnow()
-            self.repository.save_document(document, chunks, previous_ids)
+            self.repository.save_document(document, chunks, [item.id for item in previous_records])
+            self._mark_replaced_versions(document, previous_records)
             self.indexing_service.upsert_document(document, chunks)
             if self.retrieval_cache:
                 self.retrieval_cache.invalidate_all()
@@ -105,7 +106,7 @@ class DocumentIngestionOrchestrator:
         document.updated_at = utcnow()
         self.repository.update_document(document)
 
-    def _resolve_previous_ids(self, document: DocumentRecord) -> list[str]:
+    def _resolve_previous_records(self, document: DocumentRecord) -> list[DocumentRecord]:
         if document.source_connector and document.source_document_id:
             history = self.repository.list_documents_by_source_ref(
                 document.tenant_id,
@@ -115,4 +116,15 @@ class DocumentIngestionOrchestrator:
         else:
             history = self.repository.list_documents_by_title(document.tenant_id, document.title)
 
-        return [record.id for record in history if record.id != document.id and record.current]
+        return [record for record in history if record.id != document.id and record.current]
+
+    def _mark_replaced_versions(self, document: DocumentRecord, previous_records: list[DocumentRecord]) -> None:
+        """Mark older current versions as deprecated once the new version finishes indexing."""
+
+        for previous in previous_records:
+            previous.current = False
+            previous.lifecycle_status = DocumentLifecycleStatus.DEPRECATED
+            previous.replaced_by_doc_id = document.id
+            previous.lifecycle_reason = f"superseded by {document.id}"
+            previous.updated_at = utcnow()
+            self.repository.update_document(previous)

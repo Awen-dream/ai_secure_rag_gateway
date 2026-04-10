@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.auth.models import UserContext
 from app.domain.auth.policies import can_access_department, can_access_visibility
-from app.domain.documents.models import DocumentChunk, DocumentRecord
+from app.domain.documents.models import DocumentChunk, DocumentLifecycleStatus, DocumentRecord
 
 
 class AccessFilter(BaseModel):
@@ -23,6 +23,7 @@ class AccessFilter(BaseModel):
         return (
             document.current
             and document.tenant_id == self.tenant_id
+            and document.lifecycle_status != DocumentLifecycleStatus.RETIRED
             and document.security_level <= self.max_security_level
             and can_access_department(document.department_scope, self.to_user_context())
             and can_access_visibility(document.visibility_scope, document.owner_id, document.department_scope, self.to_user_context())
@@ -41,6 +42,7 @@ class AccessFilter(BaseModel):
         filters: list[dict] = [
             {"term": {"tenant_id": self.tenant_id}},
             {"term": {"current": True}},
+            {"term": {"lifecycle_status": "active"}},
             {"range": {"security_level": {"lte": self.max_security_level}}},
             {
                 "bool": {
@@ -117,6 +119,7 @@ class AccessFilter(BaseModel):
         return (
             "tenant_id = %(tenant_id)s "
             "AND current = TRUE "
+            "AND lifecycle_status = 'active' "
             "AND security_level <= %(max_security_level)s "
             "AND chunk_id = ANY(%(chunk_ids)s::text[]) "
             "AND (jsonb_array_length(role_scope) = 0 OR role_scope ? %(role)s) "
