@@ -366,20 +366,44 @@
             <h2>Document Management</h2>
             <div class="actions">
               <button id="loadDocumentsBtn">加载文档</button>
+              <button class="secondary" id="loadStaleDocsBtn">检查陈旧文档</button>
             </div>
           </div>
           <div class="panel-body stack">
             <div class="triple">
               <label>状态<input id="docStatusFilter" placeholder="success / failed / pending" /></label>
+              <label>生命周期<input id="docLifecycleFilter" placeholder="active / deprecated / retired" /></label>
               <label>来源类型<input id="docSourceFilter" placeholder="manual / pdf / feishu_docx" /></label>
-              <label>搜索<input id="docSearchFilter" placeholder="标题或标签" /></label>
             </div>
+            <label>搜索<input id="docSearchFilter" placeholder="标题或标签" /></label>
             <div class="inline">
               <label>文档 ID<input id="retireDocId" placeholder="doc_xxx" /></label>
               <label>退役原因<input id="retireReason" value="retired by admin console" /></label>
             </div>
             <div class="actions">
               <button class="warn" id="retireDocBtn">退役文档</button>
+            </div>
+            <div class="block">
+              <h4>Lifecycle Governance</h4>
+              <div class="inline">
+                <label>目标文档 ID<input id="lifecycleDocId" placeholder="doc_old_xxx" /></label>
+                <label>替代文档 ID<input id="replacementDocId" placeholder="doc_new_xxx" /></label>
+              </div>
+              <div class="inline">
+                <label>治理原因<input id="lifecycleReason" value="superseded by newer document" /></label>
+                <label>陈旧阈值天数<input id="staleThresholdDays" type="number" min="1" max="3650" value="30" /></label>
+              </div>
+              <div class="inline">
+                <label>恢复时 source_last_seen_at（可选）
+                  <input id="restoreSeenAt" placeholder="2026-04-10T00:00:00" />
+                </label>
+                <div class="status">替代会把旧文档标成 deprecated 并退出 active 检索；restore 会重新回到 active。</div>
+              </div>
+              <div class="actions">
+                <button class="secondary" id="deprecateDocBtn">标记 Deprecated</button>
+                <button id="replaceDocBtn">建立替代关系</button>
+                <button class="secondary" id="restoreDocBtn">恢复 Active</button>
+              </div>
             </div>
             <div class="status mono" id="documentStatus"></div>
           </div>
@@ -459,6 +483,8 @@
     function renderMetrics(summary) {
       const cards = [
         ["文档总数", summary.documents.total, `当前生效 ${summary.documents.current}`],
+        ["Active 文档", summary.documents.active, `Deprecated ${summary.documents.deprecated}`],
+        ["陈旧文档", summary.documents.stale, `Lifecycle Retired ${summary.documents.lifecycle_retired}`],
         ["总问答量", summary.traffic.total_queries, `24h ${summary.traffic.recent_queries_24h}`],
         ["引用覆盖率", summary.quality.citation_coverage_rate, `改写率 ${summary.quality.rewrite_rate}`],
         ["拒答率", summary.quality.refusal_rate, `平均延迟 ${summary.quality.average_latency_ms} ms`],
@@ -480,7 +506,11 @@
         <tr><td>${item.title}</td><td>${item.hits}</td></tr>
       `).join("") || `<tr><td colspan="2" class="muted">暂无数据</td></tr>`;
       document.getElementById("evaluationSummary").textContent = JSON.stringify(summary.evaluation, null, 2);
-      document.getElementById("infraSummary").textContent = JSON.stringify(summary.operations, null, 2);
+      document.getElementById("infraSummary").textContent = JSON.stringify({
+        operations: summary.operations,
+        document_status: summary.documents.by_status,
+        document_lifecycle: summary.documents.by_lifecycle_status,
+      }, null, 2);
     }
 
     async function refreshDashboard() {
@@ -571,9 +601,11 @@
     async function loadDocuments() {
       const params = new URLSearchParams();
       const status = document.getElementById("docStatusFilter").value.trim();
+      const lifecycleStatus = document.getElementById("docLifecycleFilter").value.trim();
       const sourceType = document.getElementById("docSourceFilter").value.trim();
       const search = document.getElementById("docSearchFilter").value.trim();
       if (status) params.set("status", status);
+      if (lifecycleStatus) params.set("lifecycle_status", lifecycleStatus);
       if (sourceType) params.set("source_type", sourceType);
       if (search) params.set("search", search);
       const payload = await callApi(`/api/v1/admin/documents?${params.toString()}`);
@@ -588,6 +620,62 @@
       }
       const reason = encodeURIComponent(document.getElementById("retireReason").value.trim() || "retired by admin console");
       const payload = await callApi(`/api/v1/admin/documents/${docId}/retire?reason=${reason}`, { method: "POST" });
+      document.getElementById("documentStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function deprecateDocument() {
+      const docId = document.getElementById("lifecycleDocId").value.trim();
+      if (!docId) {
+        document.getElementById("documentStatus").textContent = "请先填写要治理的文档 ID。";
+        return;
+      }
+      const reason = document.getElementById("lifecycleReason").value.trim() || "deprecated by admin console";
+      const payload = await callApi(`/api/v1/admin/documents/${docId}/deprecate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      document.getElementById("documentStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function replaceDocument() {
+      const docId = document.getElementById("lifecycleDocId").value.trim();
+      const replacementId = document.getElementById("replacementDocId").value.trim();
+      if (!docId || !replacementId) {
+        document.getElementById("documentStatus").textContent = "请同时填写目标文档 ID 和替代文档 ID。";
+        return;
+      }
+      const reason = document.getElementById("lifecycleReason").value.trim() || "superseded by newer document";
+      const payload = await callApi(`/api/v1/admin/documents/${docId}/replace`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replaced_by_doc_id: replacementId, reason }),
+      });
+      document.getElementById("documentStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function restoreDocument() {
+      const docId = document.getElementById("lifecycleDocId").value.trim();
+      if (!docId) {
+        document.getElementById("documentStatus").textContent = "请先填写要恢复的文档 ID。";
+        return;
+      }
+      const reason = document.getElementById("lifecycleReason").value.trim() || "restored by admin console";
+      const sourceLastSeenAt = document.getElementById("restoreSeenAt").value.trim();
+      const payload = await callApi(`/api/v1/admin/documents/${docId}/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason,
+          source_last_seen_at: sourceLastSeenAt || null,
+        }),
+      });
+      document.getElementById("documentStatus").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function loadStaleDocuments() {
+      const thresholdDays = document.getElementById("staleThresholdDays").value.trim() || "30";
+      const payload = await callApi(`/api/v1/admin/documents/stale?threshold_days=${encodeURIComponent(thresholdDays)}`);
       document.getElementById("documentStatus").textContent = JSON.stringify(payload, null, 2);
     }
 
@@ -620,7 +708,11 @@
     document.getElementById("loadReleaseGateBtn").addEventListener("click", () => loadReleaseGate().catch(showError));
     document.getElementById("bulkAnnotateBtn").addEventListener("click", () => bulkAnnotate().catch(showError));
     document.getElementById("loadDocumentsBtn").addEventListener("click", () => loadDocuments().catch(showError));
+    document.getElementById("loadStaleDocsBtn").addEventListener("click", () => loadStaleDocuments().catch(showError));
     document.getElementById("retireDocBtn").addEventListener("click", () => retireDocument().catch(showError));
+    document.getElementById("deprecateDocBtn").addEventListener("click", () => deprecateDocument().catch(showError));
+    document.getElementById("replaceDocBtn").addEventListener("click", () => replaceDocument().catch(showError));
+    document.getElementById("restoreDocBtn").addEventListener("click", () => restoreDocument().catch(showError));
     document.getElementById("loadAuditBtn").addEventListener("click", () => loadAudit().catch(showError));
 
     function showError(error) {

@@ -151,6 +151,7 @@ class AdminConsoleEndpointTest(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         payload = dashboard.json()
         self.assertEqual(payload["documents"]["total"], 1)
+        self.assertEqual(payload["documents"]["active"], 1)
         self.assertGreaterEqual(payload["traffic"]["total_queries"], 1)
         self.assertIn("release_readiness", payload["evaluation"])
 
@@ -409,6 +410,48 @@ class AdminConsoleEndpointTest(unittest.TestCase):
         self.assertEqual(stale_payload["threshold_days"], 30)
         stale_ids = {item["id"] for item in stale_payload["documents"]}
         self.assertIn(doc_id, stale_ids)
+
+    def test_admin_can_filter_documents_by_lifecycle_status(self) -> None:
+        original = self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "历史制度",
+                "content": "历史制度说明。",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        replacement = self.client.post(
+            "/api/v1/docs/upload",
+            json={
+                "title": "现行制度",
+                "content": "现行制度说明。",
+                "department_scope": ["engineering"],
+                "security_level": 1,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(original.status_code, 200)
+        self.assertEqual(replacement.status_code, 200)
+        old_doc_id = original.json()["id"]
+        new_doc_id = replacement.json()["id"]
+
+        replaced = self.client.post(
+            f"/api/v1/admin/documents/{old_doc_id}/replace",
+            json={"replaced_by_doc_id": new_doc_id, "reason": "政策已更新"},
+            headers=self.headers,
+        )
+        self.assertEqual(replaced.status_code, 200)
+
+        deprecated_docs = self.client.get(
+            "/api/v1/admin/documents?lifecycle_status=deprecated",
+            headers=self.headers,
+        )
+        self.assertEqual(deprecated_docs.status_code, 200)
+        deprecated_ids = {item["id"] for item in deprecated_docs.json()}
+        self.assertIn(old_doc_id, deprecated_ids)
+        self.assertNotIn(new_doc_id, deprecated_ids)
 
 
 if __name__ == "__main__":

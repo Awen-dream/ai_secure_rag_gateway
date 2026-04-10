@@ -161,6 +161,7 @@ make run-ingestion-worker
 当前运营看板聚合的核心指标包括：
 
 - 文档总量、当前生效数、失败数、来源分布
+- 生命周期分布：active、deprecated、retired、stale
 - 总问答量、24h 请求量、活跃会话、独立用户
 - 引用覆盖率、拒答率、改写率、平均延迟
 - 最新 offline/shadow evaluation 与 release readiness 决策
@@ -230,6 +231,10 @@ scripts/
 - `GET /api/v1/admin/dashboard/summary`
 - `GET /api/v1/admin/documents`
 - `POST /api/v1/admin/documents/{doc_id}/retire`
+- `POST /api/v1/admin/documents/{doc_id}/deprecate`
+- `POST /api/v1/admin/documents/{doc_id}/replace`
+- `POST /api/v1/admin/documents/{doc_id}/restore`
+- `GET /api/v1/admin/documents/stale`
 - `GET /api/v1/admin/evaluation/dataset`
 - `GET /api/v1/admin/evaluation/dataset/stats`
 - `GET /api/v1/admin/evaluation/dataset/overview`
@@ -350,6 +355,8 @@ scripts/
 - release readiness report 与显式 release gate checklist
 - `scripts/prepare_release_gate_fixture.py` 可生成最小文档、评测样本、offline run 与 shadow run
 - `make prepare-release-gate` / `make release-gate` 可在本地复现 CI 的发布门禁流程
+- 文档生命周期治理：`active / deprecated / retired`、`replaced_by_doc_id`、`source_last_seen_at`
+- 管理台可直接做 `deprecate / replace / restore / stale` 治理动作
 - 结构化审计检索与后台看板汇总
 
 本地启动 ingestion worker：

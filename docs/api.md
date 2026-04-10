@@ -58,8 +58,16 @@
 - `GET /api/v1/admin/dashboard/summary`
   - 返回聚合后的文档、流量、质量、风险、评测、缓存、队列和飞书连接器状态。
 - `GET /api/v1/admin/documents`
-  - 返回管理侧文档清单，支持 `tenant_id`、`status`、`source_type`、`search`、`current_only`、`limit` 过滤。
+  - 返回管理侧文档清单，支持 `tenant_id`、`status`、`lifecycle_status`、`source_type`、`search`、`current_only`、`limit` 过滤。
 - `POST /api/v1/admin/documents/{doc_id}/retire`
   - 退役一个文档版本，并同步清理对应索引。
+- `POST /api/v1/admin/documents/{doc_id}/deprecate`
+  - 将文档标记为 `deprecated`，保留历史但退出 active 检索。
+- `POST /api/v1/admin/documents/{doc_id}/replace`
+  - 建立旧文档到新文档的替代关系，并将旧文档标记为 `deprecated`。
+- `POST /api/v1/admin/documents/{doc_id}/restore`
+  - 将 `deprecated/retired` 文档恢复为 `active`。
+- `GET /api/v1/admin/documents/stale`
+  - 查询超过阈值天数未从外部源重新看到的文档，适合做陈旧治理。
 - `GET /api/v1/admin/audit`
   - 支持通过 `limit`、`risk_level`、`action`、`scene`、`query` 过滤结构化审计记录。

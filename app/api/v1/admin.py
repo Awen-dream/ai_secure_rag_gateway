@@ -463,6 +463,7 @@ def get_admin_dashboard_summary(
 def list_admin_documents(
     tenant_id: Optional[str] = None,
     status: Optional[str] = None,
+    lifecycle_status: Optional[str] = None,
     source_type: Optional[str] = None,
     search: Optional[str] = None,
     current_only: bool = Query(False),
@@ -475,6 +476,7 @@ def list_admin_documents(
     return service.list_documents(
         tenant_id=tenant_id,
         status=status,
+        lifecycle_status=lifecycle_status,
         source_type=source_type,
         search=search,
         current_only=current_only,

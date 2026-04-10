@@ -66,6 +66,7 @@ class AdminConsoleService:
         recent_cutoff = now - timedelta(hours=24)
 
         status_counts = Counter(_document_status_value(document) for document in documents)
+        lifecycle_counts = Counter(_document_lifecycle_value(document) for document in documents)
         source_counts = Counter(document.source_type for document in documents)
         connector_counts = Counter(document.source_connector or "manual" for document in documents)
         security_counts = Counter(str(document.security_level) for document in documents)
@@ -98,6 +99,11 @@ class AdminConsoleService:
                 "failed": status_counts.get(DocumentStatus.FAILED.value, 0),
                 "retired": status_counts.get(DocumentStatus.RETIRED.value, 0),
                 "by_status": dict(status_counts),
+                "active": lifecycle_counts.get(DocumentLifecycleStatus.ACTIVE.value, 0),
+                "deprecated": lifecycle_counts.get(DocumentLifecycleStatus.DEPRECATED.value, 0),
+                "lifecycle_retired": lifecycle_counts.get(DocumentLifecycleStatus.RETIRED.value, 0),
+                "by_lifecycle_status": dict(lifecycle_counts),
+                "stale": len(self.list_stale_documents()),
                 "by_source_type": dict(source_counts),
                 "by_connector": dict(connector_counts),
                 "by_security_level": dict(security_counts),
@@ -152,6 +158,7 @@ class AdminConsoleService:
         self,
         tenant_id: Optional[str] = None,
         status: Optional[str] = None,
+        lifecycle_status: Optional[str] = None,
         source_type: Optional[str] = None,
         search: Optional[str] = None,
         current_only: bool = False,
@@ -164,6 +171,8 @@ class AdminConsoleService:
         filtered: list[DocumentRecord] = []
         for document in documents:
             if status and _document_status_value(document) != status:
+                continue
+            if lifecycle_status and _document_lifecycle_value(document) != lifecycle_status:
                 continue
             if source_type and document.source_type != source_type:
                 continue
@@ -295,3 +304,9 @@ class AdminConsoleService:
 
 def _document_status_value(document: DocumentRecord) -> str:
     return document.status.value if isinstance(document.status, DocumentStatus) else str(document.status)
+
+
+def _document_lifecycle_value(document: DocumentRecord) -> str:
+    if isinstance(document.lifecycle_status, DocumentLifecycleStatus):
+        return document.lifecycle_status.value
+    return str(document.lifecycle_status)
