@@ -413,6 +413,10 @@ make run-ingestion-worker
 - Feishu `wiki -> docx` 节点解析
 - 管理侧导入接口，导入后直接复用文档异步 ingest 队列
 
+长流程编排实验可通过以下环境变量切换：
+
+- `APP_SOURCE_SYNC_ENGINE=native|langgraph`
+
 后续接入 PostgreSQL、Redis、Milvus、PGVector、Elasticsearch、LlamaIndex、LangChain 时，可以直接替换基础设施层实现而保留现有领域与 API 边界。
 
 接口与核心方法备注说明规范见 [docs/development-standards.md](docs/development-standards.md)。

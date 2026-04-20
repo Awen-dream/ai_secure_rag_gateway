@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 
 from app.application.admin.service import AdminConsoleService
 from app.application.chat.orchestrator import ChatOrchestrator
@@ -36,6 +37,8 @@ from app.infrastructure.frameworks.llamaindex_eval import LlamaIndexEvaluationEx
 from app.infrastructure.frameworks.llamaindex_ingestion import LlamaIndexDocumentIngestionEngine
 from app.infrastructure.frameworks.langchain_embeddings import LangChainEmbeddingAdapter
 from app.infrastructure.frameworks.langchain_llm import LangChainChatClientAdapter, LangChainOpenAIResponsesAdapter
+from app.infrastructure.frameworks.langgraph_ingestion import LangGraphDocumentIngestionEngine
+from app.infrastructure.frameworks.langgraph_source_sync import LangGraphSourceSyncWorkflow
 from app.infrastructure.llm.deepseek_client import DeepSeekClient
 from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
@@ -187,6 +190,8 @@ def get_document_ingestion_engine() -> DocumentIngestionEngine:
 
     if settings.ingestion_engine == "llamaindex":
         return LlamaIndexDocumentIngestionEngine()
+    if settings.ingestion_engine == "langgraph":
+        return LangGraphDocumentIngestionEngine()
     return NativeDocumentIngestionEngine()
 
 
@@ -534,4 +539,14 @@ def get_feishu_source_sync_service() -> FeishuSourceSyncService:
         document_service=get_document_service(),
         task_queue=get_document_task_queue(),
         ingestion_orchestrator=get_document_ingestion_orchestrator(),
+        source_sync_workflow=get_source_sync_workflow(),
     )
+
+
+@lru_cache
+def get_source_sync_workflow() -> Optional[LangGraphSourceSyncWorkflow]:
+    """Return the configured source-sync workflow adapter."""
+
+    if settings.source_sync_engine == "langgraph":
+        return LangGraphSourceSyncWorkflow()
+    return None

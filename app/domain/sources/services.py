@@ -42,12 +42,14 @@ class FeishuSourceSyncService:
         document_service: DocumentService,
         task_queue: DocumentIngestionTaskQueue,
         ingestion_orchestrator: DocumentIngestionOrchestrator,
+        source_sync_workflow=None,
     ) -> None:
         self.feishu_client = feishu_client
         self.repository = repository
         self.document_service = document_service
         self.task_queue = task_queue
         self.ingestion_orchestrator = ingestion_orchestrator
+        self.source_sync_workflow = source_sync_workflow
 
     def import_source(self, payload: FeishuImportRequest, user: UserContext) -> FeishuImportResponse:
         """Fetch one Feishu source, register it as a gateway document, and optionally enqueue ingestion."""
@@ -257,6 +259,18 @@ class FeishuSourceSyncService:
 
     def run_sync_job(self, job_id: str, user: UserContext) -> FeishuBatchSyncResponse:
         """Execute one saved sync job using its persisted cursor and update the checkpoint."""
+
+        if self.source_sync_workflow:
+            workflow = self.source_sync_workflow.build_run_sync_job_workflow(self._run_sync_job_native)
+            if workflow is not None:
+                state = workflow.invoke({"job_id": job_id, "user": user})
+                summary = state.get("summary") if isinstance(state, dict) else None
+                if isinstance(summary, FeishuBatchSyncResponse):
+                    return summary
+        return self._run_sync_job_native(job_id, user)
+
+    def _run_sync_job_native(self, job_id: str, user: UserContext) -> FeishuBatchSyncResponse:
+        """Native implementation of one saved sync job execution."""
 
         job = self.repository.get_source_sync_job(user.tenant_id, self.feishu_client.provider, job_id)
         if not job:

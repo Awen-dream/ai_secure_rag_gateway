@@ -26,6 +26,7 @@ class AppSettings(BaseModel):
     source_sync_scheduler_poll_seconds: float = float(os.getenv("APP_SOURCE_SYNC_SCHEDULER_POLL_SECONDS", "60.0"))
     ingestion_engine: str = os.getenv("APP_INGESTION_ENGINE", "native")
     evaluation_engine: str = os.getenv("APP_EVAL_ENGINE", "native")
+    source_sync_engine: str = os.getenv("APP_SOURCE_SYNC_ENGINE", "native")
     feishu_base_url: str = os.getenv("APP_FEISHU_BASE_URL", "https://open.feishu.cn/open-apis")
     feishu_app_id: Optional[str] = os.getenv("APP_FEISHU_APP_ID")
     feishu_app_secret: Optional[str] = os.getenv("APP_FEISHU_APP_SECRET")
