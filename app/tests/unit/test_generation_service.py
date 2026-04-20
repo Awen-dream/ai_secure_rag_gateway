@@ -27,7 +27,7 @@ class GenerationServiceTest(unittest.TestCase):
         service = GenerationService(
             prompt_template_service=_PromptServiceStub(),
             output_guard=OutputGuard(),
-            openai_client=OpenAIClient(
+            llm_client=OpenAIClient(
                 api_key=None,
                 model="gpt-5.4-mini",
                 base_url="https://api.openai.com/v1",
@@ -72,7 +72,7 @@ class GenerationServiceTest(unittest.TestCase):
         service = GenerationService(
             prompt_template_service=_PromptServiceStub(),
             output_guard=OutputGuard(),
-            openai_client=OpenAIClient(
+            llm_client=OpenAIClient(
                 api_key=None,
                 model="gpt-5.4-mini",
                 base_url="https://api.openai.com/v1",

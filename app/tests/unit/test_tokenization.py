@@ -31,6 +31,15 @@ class TokenizationTests(unittest.TestCase):
         self.assertEqual(count, 4)
         fake_tiktoken.get_encoding.assert_called_once_with("cl100k_base")
 
+    def test_model_lookup_network_failure_falls_back_to_approximation(self) -> None:
+        tokenization._get_tokenizer.cache_clear()
+        with patch.object(tokenization, "tiktoken", create=True) as fake_tiktoken:
+            fake_tiktoken.encoding_for_model.side_effect = RuntimeError("network unavailable")
+            fake_tiktoken.get_encoding.side_effect = RuntimeError("network unavailable")
+            count = tokenization.estimate_token_count("报销审批时限为3个工作日。")
+
+        self.assertGreater(count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

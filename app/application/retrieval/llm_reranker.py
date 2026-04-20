@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from app.domain.retrieval.models import RetrievalResult
 from app.domain.retrieval.rerankers import RetrievalReranker, sort_by_score
-from app.infrastructure.llm.openai_client import OpenAIClient
+from app.infrastructure.llm.base import LLMClient
 
 
 _RANK_ID_RE = re.compile(r"R(\d+)")
@@ -25,7 +25,7 @@ class LLMRerankDecision:
 class LLMReranker(RetrievalReranker):
     """Use an LLM to rerank top retrieval candidates when a remote model is configured."""
 
-    client: OpenAIClient
+    client: LLMClient
     top_n: int = 8
 
     def rerank(self, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:

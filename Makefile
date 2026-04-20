@@ -12,12 +12,15 @@ UNIT_TESTS = \
 	app.tests.unit.test_feishu_client \
 	app.tests.unit.test_feishu_source_sync_service \
 	app.tests.unit.test_ingestion_pipelines \
+	app.tests.unit.test_tokenization \
 	app.tests.unit.test_import \
 	app.tests.unit.test_hybrid_retrieval \
 	app.tests.unit.test_cache_services \
 	app.tests.unit.test_chat_rate_limit \
 	app.tests.unit.test_openai_client \
+	app.tests.unit.test_openai_compatible_clients \
 	app.tests.unit.test_openai_embeddings \
+	app.tests.unit.test_llm_router \
 	app.tests.unit.test_query_intent \
 	app.tests.unit.test_query_understanding \
 	app.tests.unit.test_offline_evaluation_service \

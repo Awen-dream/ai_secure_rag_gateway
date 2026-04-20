@@ -8,7 +8,7 @@ from app.domain.prompts.models import PromptValidationResult
 from app.domain.prompts.template_service import PromptTemplateService
 from app.domain.risk.models import OutputGuardResult, RiskAction
 from app.domain.risk.output_guard import OutputGuard
-from app.infrastructure.llm.openai_client import OpenAIClient
+from app.infrastructure.llm.base import LLMClient
 
 
 @dataclass(frozen=True)
@@ -28,11 +28,11 @@ class GenerationService:
         self,
         prompt_template_service: PromptTemplateService,
         output_guard: OutputGuard,
-        openai_client: OpenAIClient,
+        llm_client: LLMClient,
     ) -> None:
         self.prompt_template_service = prompt_template_service
         self.output_guard = output_guard
-        self.openai_client = openai_client
+        self.llm_client = llm_client
 
     def generate_chat_answer(
         self,
@@ -67,9 +67,9 @@ class GenerationService:
                 return self._build_no_evidence_answer("高敏部门在无证据命中时只返回保守结果。")
             return self._build_no_evidence_answer("检索范围内没有找到足够证据。")
 
-        if self.openai_client.can_execute():
+        if self.llm_client.can_execute():
             try:
-                return self.openai_client.generate_response(
+                return self.llm_client.generate_response(
                     instructions=prompt_build.rendered_prompt.instructions,
                     input_text=prompt_build.rendered_prompt.input_text,
                 )

@@ -27,6 +27,10 @@ class AppSettings(BaseModel):
     feishu_base_url: str = os.getenv("APP_FEISHU_BASE_URL", "https://open.feishu.cn/open-apis")
     feishu_app_id: Optional[str] = os.getenv("APP_FEISHU_APP_ID")
     feishu_app_secret: Optional[str] = os.getenv("APP_FEISHU_APP_SECRET")
+    llm_default_provider: str = os.getenv("APP_LLM_DEFAULT_PROVIDER", "openai")
+    llm_generation_provider: str = os.getenv("APP_LLM_GENERATION_PROVIDER", "")
+    llm_query_understanding_provider: str = os.getenv("APP_LLM_QUERY_UNDERSTANDING_PROVIDER", "")
+    llm_reranker_provider: str = os.getenv("APP_LLM_RERANKER_PROVIDER", "")
     embedding_provider: str = os.getenv("APP_EMBEDDING_PROVIDER", "local-fallback")
     embedding_api_key: Optional[str] = os.getenv("APP_EMBEDDING_API_KEY", os.getenv("OPENAI_API_KEY"))
     embedding_base_url: str = os.getenv("APP_EMBEDDING_BASE_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
@@ -57,6 +61,24 @@ class AppSettings(BaseModel):
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
     openai_max_output_tokens: int = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "900"))
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
+    qwen_api_key: Optional[str] = os.getenv("APP_QWEN_API_KEY", os.getenv("QWEN_API_KEY"))
+    qwen_model: str = os.getenv("APP_QWEN_MODEL", os.getenv("QWEN_MODEL", "qwen-plus"))
+    qwen_base_url: str = os.getenv(
+        "APP_QWEN_BASE_URL",
+        os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    )
+    qwen_timeout_seconds: float = float(os.getenv("APP_QWEN_TIMEOUT_SECONDS", "30"))
+    qwen_max_output_tokens: int = int(os.getenv("APP_QWEN_MAX_OUTPUT_TOKENS", "900"))
+    qwen_temperature: float = float(os.getenv("APP_QWEN_TEMPERATURE", "0.1"))
+    deepseek_api_key: Optional[str] = os.getenv("APP_DEEPSEEK_API_KEY", os.getenv("DEEPSEEK_API_KEY"))
+    deepseek_model: str = os.getenv("APP_DEEPSEEK_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
+    deepseek_base_url: str = os.getenv(
+        "APP_DEEPSEEK_BASE_URL",
+        os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+    )
+    deepseek_timeout_seconds: float = float(os.getenv("APP_DEEPSEEK_TIMEOUT_SECONDS", "30"))
+    deepseek_max_output_tokens: int = int(os.getenv("APP_DEEPSEEK_MAX_OUTPUT_TOKENS", "900"))
+    deepseek_temperature: float = float(os.getenv("APP_DEEPSEEK_TEMPERATURE", "0.1"))
 
 
 settings = AppSettings()

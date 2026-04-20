@@ -30,8 +30,11 @@ from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 from app.infrastructure.external_sources.feishu import FeishuClient
+from app.infrastructure.llm.deepseek_client import DeepSeekClient
 from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
+from app.infrastructure.llm.qwen_client import QwenClient
+from app.infrastructure.llm.router import LLMRouter
 from app.infrastructure.queue.worker import DocumentIngestionTaskQueue, DocumentIngestionWorker
 from app.infrastructure.search.elasticsearch import ElasticsearchSearch
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
@@ -246,7 +249,7 @@ def get_generation_service() -> GenerationService:
     return GenerationService(
         prompt_template_service=get_prompt_template_service(),
         output_guard=get_output_guard(),
-        openai_client=get_openai_client(),
+        llm_client=get_llm_router().get_client("generation"),
     )
 
 
@@ -304,6 +307,50 @@ def get_openai_client() -> OpenAIClient:
     )
 
 
+def get_qwen_client() -> QwenClient:
+    """Return the Qwen client wired against Alibaba Cloud's OpenAI-compatible chat API."""
+
+    return QwenClient(
+        api_key=settings.qwen_api_key,
+        model=settings.qwen_model,
+        base_url=settings.qwen_base_url,
+        timeout_seconds=settings.qwen_timeout_seconds,
+        max_output_tokens=settings.qwen_max_output_tokens,
+        temperature=settings.qwen_temperature,
+    )
+
+
+def get_deepseek_client() -> DeepSeekClient:
+    """Return the DeepSeek client wired against its OpenAI-compatible chat API."""
+
+    return DeepSeekClient(
+        api_key=settings.deepseek_api_key,
+        model=settings.deepseek_model,
+        base_url=settings.deepseek_base_url,
+        timeout_seconds=settings.deepseek_timeout_seconds,
+        max_output_tokens=settings.deepseek_max_output_tokens,
+        temperature=settings.deepseek_temperature,
+    )
+
+
+def get_llm_router() -> LLMRouter:
+    """Return the per-purpose LLM router used by generation, rerank and understanding."""
+
+    return LLMRouter.build(
+        default_provider=settings.llm_default_provider,
+        generation_provider=settings.llm_generation_provider or settings.llm_default_provider,
+        query_understanding_provider=(
+            settings.llm_query_understanding_provider or settings.llm_default_provider
+        ),
+        reranker_provider=settings.llm_reranker_provider or settings.llm_default_provider,
+        clients=[
+            get_openai_client(),
+            get_qwen_client(),
+            get_deepseek_client(),
+        ],
+    )
+
+
 @lru_cache
 def get_embedding_client() -> OpenAIEmbeddingClient:
     """Return the embedding client used by vector indexing and semantic retrieval."""
@@ -330,7 +377,7 @@ def get_retrieval_reranker() -> RetrievalReranker:
         return heuristic
     if settings.reranker_mode == "llm":
         return CompositeReranker(
-            primary=LLMReranker(client=get_openai_client(), top_n=settings.reranker_top_n),
+            primary=LLMReranker(client=get_llm_router().get_client("reranker"), top_n=settings.reranker_top_n),
             fallback=heuristic,
         )
     if settings.reranker_mode == "heuristic":
@@ -342,7 +389,7 @@ def get_retrieval_reranker() -> RetrievalReranker:
 def get_query_understanding_service() -> QueryUnderstandingService:
     """Return the shared query-understanding service used by planning and retrieval."""
 
-    return QueryUnderstandingService(get_openai_client())
+    return QueryUnderstandingService(get_llm_router().get_client("query_understanding"))
 
 
 @lru_cache

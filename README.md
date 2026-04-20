@@ -63,21 +63,46 @@ make run-ingestion-worker
 - `CHUNK_MAX_TOKENS`
 - `CHUNK_OVERLAP_TOKENS`
 
-## OpenAI 生成层
+## 多模型路由
 
-当前问答主链路已支持 OpenAI Responses API：
+当前问答主链路支持按用途路由到不同模型提供方：
 
-- 配置了 `OPENAI_API_KEY` 时，`/api/v1/chat/query` 会调用真实 OpenAI 生成层
-- 未配置时，会安全回退到本地规则回答，方便本地开发和离线测试
+- `OpenAI`：原生 Responses API
+- `Qwen`：Alibaba Cloud Model Studio / DashScope 的 OpenAI-compatible `chat/completions`
+- `DeepSeek`：DeepSeek 的 OpenAI-compatible `chat/completions`
+
+三个用途可以独立选路：
+
+- `generation`
+- `query_understanding`
+- `reranker`
+
+如果某个用途配置的 provider 不可用，路由会优先回退到默认 provider，再回退到当前已配置可执行的其他 provider；如果都不可执行，则继续走平台原有的本地安全回退答案。
 
 相关环境变量：
 
+- `APP_LLM_DEFAULT_PROVIDER`
+- `APP_LLM_GENERATION_PROVIDER`
+- `APP_LLM_QUERY_UNDERSTANDING_PROVIDER`
+- `APP_LLM_RERANKER_PROVIDER`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `OPENAI_BASE_URL`
 - `OPENAI_TIMEOUT_SECONDS`
 - `OPENAI_MAX_OUTPUT_TOKENS`
 - `OPENAI_TEMPERATURE`
+- `APP_QWEN_API_KEY`
+- `APP_QWEN_MODEL`
+- `APP_QWEN_BASE_URL`
+- `APP_QWEN_TIMEOUT_SECONDS`
+- `APP_QWEN_MAX_OUTPUT_TOKENS`
+- `APP_QWEN_TEMPERATURE`
+- `APP_DEEPSEEK_API_KEY`
+- `APP_DEEPSEEK_MODEL`
+- `APP_DEEPSEEK_BASE_URL`
+- `APP_DEEPSEEK_TIMEOUT_SECONDS`
+- `APP_DEEPSEEK_MAX_OUTPUT_TOKENS`
+- `APP_DEEPSEEK_TEMPERATURE`
 
 ## Redis 缓存与限流
 

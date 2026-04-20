@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.application.query.intent import classify_query_intent_details
 from app.application.query.rewrite import rewrite_query
-from app.infrastructure.llm.openai_client import OpenAIClient
+from app.infrastructure.llm.base import LLMClient
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 _ALLOWED_INTENTS = {"exact_lookup", "summary", "standard_qa"}
@@ -44,8 +44,8 @@ class QueryUnderstandingResult:
 class QueryUnderstandingService:
     """Hybrid query understanding with deterministic fallback and optional LLM refinement."""
 
-    def __init__(self, openai_client: OpenAIClient | None = None) -> None:
-        self.openai_client = openai_client
+    def __init__(self, llm_client: LLMClient | None = None) -> None:
+        self.llm_client = llm_client
 
     def understand(
         self,
@@ -67,7 +67,7 @@ class QueryUnderstandingService:
             return fallback
 
         try:
-            response_text = self.openai_client.generate_response(
+            response_text = self.llm_client.generate_response(
                 instructions=self._build_instructions(),
                 input_text=self._build_input(
                     query,
@@ -121,7 +121,7 @@ class QueryUnderstandingService:
         last_user_query: str | None = None,
         session_summary: str | None = None,
     ) -> bool:
-        if not self.openai_client or not self.openai_client.can_execute():
+        if not self.llm_client or not self.llm_client.can_execute():
             return False
 
         normalized = rewrite_query(query)

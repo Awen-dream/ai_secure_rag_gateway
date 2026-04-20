@@ -39,15 +39,15 @@ def _get_tokenizer(model: str, encoding_name: str | None) -> _Tokenizer | None:
     if encoding_name:
         try:
             return tiktoken.get_encoding(encoding_name)
-        except KeyError:
+        except Exception:
             return None
 
     try:
         return tiktoken.encoding_for_model(model)
-    except KeyError:
+    except Exception:
         try:
             return tiktoken.get_encoding("cl100k_base")
-        except KeyError:
+        except Exception:
             return None
 
 
@@ -66,4 +66,7 @@ def estimate_token_count(
     tokenizer = _get_tokenizer(resolved_model, resolved_encoding)
     if tokenizer is None:
         return approximate_token_count(cleaned)
-    return len(tokenizer.encode(cleaned, disallowed_special=()))
+    try:
+        return len(tokenizer.encode(cleaned, disallowed_special=()))
+    except Exception:
+        return approximate_token_count(cleaned)
