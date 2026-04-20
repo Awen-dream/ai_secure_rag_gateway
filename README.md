@@ -333,6 +333,11 @@ scripts/
 - OpenAI Responses API 适配器
 - 无 key / 调用失败时的安全回退
 
+LLM / embedding runtime 现已支持实验性切换：
+
+- `APP_LLM_RUNTIME=native|langchain`
+- `APP_EMBEDDING_RUNTIME=native|langchain`
+
 当前元数据层已包含：
 
 - SQLite 仓储

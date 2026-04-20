@@ -34,6 +34,8 @@ from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 from app.infrastructure.external_sources.feishu import FeishuClient
 from app.infrastructure.frameworks.llamaindex_eval import LlamaIndexEvaluationExecutionEngine
 from app.infrastructure.frameworks.llamaindex_ingestion import LlamaIndexDocumentIngestionEngine
+from app.infrastructure.frameworks.langchain_embeddings import LangChainEmbeddingAdapter
+from app.infrastructure.frameworks.langchain_llm import LangChainChatClientAdapter, LangChainOpenAIResponsesAdapter
 from app.infrastructure.llm.deepseek_client import DeepSeekClient
 from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
@@ -321,6 +323,15 @@ def get_audit_service() -> AuditService:
 def get_openai_client() -> OpenAIClient:
     """Return the OpenAI Responses API adapter used by the chat service."""
 
+    if settings.llm_runtime == "langchain":
+        return LangChainOpenAIResponsesAdapter(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            base_url=settings.openai_base_url,
+            timeout_seconds=settings.openai_timeout_seconds,
+            max_output_tokens=settings.openai_max_output_tokens,
+            temperature=settings.openai_temperature,
+        )
     return OpenAIClient(
         api_key=settings.openai_api_key,
         model=settings.openai_model,
@@ -334,6 +345,16 @@ def get_openai_client() -> OpenAIClient:
 def get_qwen_client() -> QwenClient:
     """Return the Qwen client wired against Alibaba Cloud's OpenAI-compatible chat API."""
 
+    if settings.llm_runtime == "langchain":
+        return LangChainChatClientAdapter(
+            provider="qwen",
+            api_key=settings.qwen_api_key,
+            model=settings.qwen_model,
+            base_url=settings.qwen_base_url,
+            timeout_seconds=settings.qwen_timeout_seconds,
+            max_output_tokens=settings.qwen_max_output_tokens,
+            temperature=settings.qwen_temperature,
+        )
     return QwenClient(
         api_key=settings.qwen_api_key,
         model=settings.qwen_model,
@@ -347,6 +368,16 @@ def get_qwen_client() -> QwenClient:
 def get_deepseek_client() -> DeepSeekClient:
     """Return the DeepSeek client wired against its OpenAI-compatible chat API."""
 
+    if settings.llm_runtime == "langchain":
+        return LangChainChatClientAdapter(
+            provider="deepseek",
+            api_key=settings.deepseek_api_key,
+            model=settings.deepseek_model,
+            base_url=settings.deepseek_base_url,
+            timeout_seconds=settings.deepseek_timeout_seconds,
+            max_output_tokens=settings.deepseek_max_output_tokens,
+            temperature=settings.deepseek_temperature,
+        )
     return DeepSeekClient(
         api_key=settings.deepseek_api_key,
         model=settings.deepseek_model,
@@ -379,6 +410,15 @@ def get_llm_router() -> LLMRouter:
 def get_embedding_client() -> OpenAIEmbeddingClient:
     """Return the embedding client used by vector indexing and semantic retrieval."""
 
+    if settings.embedding_runtime == "langchain":
+        return LangChainEmbeddingAdapter(
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            base_url=settings.embedding_base_url,
+            timeout_seconds=settings.embedding_timeout_seconds,
+            dimensions=settings.embedding_dimensions,
+            enabled=settings.embedding_provider == "openai",
+        )
     return OpenAIEmbeddingClient(
         api_key=settings.embedding_api_key,
         model=settings.embedding_model,
