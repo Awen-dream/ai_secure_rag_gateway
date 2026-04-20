@@ -133,6 +133,7 @@ make run-ingestion-worker
 - `APP_DOCUMENT_STAGING_DIR`
 - `APP_DOCUMENT_INGESTION_QUEUE_NAME`
 - `APP_DOCUMENT_INGESTION_WORKER_POLL_SECONDS`
+- `APP_INGESTION_ENGINE`
 
 ## 飞书数据源
 
@@ -201,6 +202,10 @@ make run-ingestion-worker
 - 基线驱动的 quality gate
 - release readiness gate
 - 本地/CI 统一的 release gate fixture 预置与阻断式发布门禁
+
+评测实验可通过以下环境变量切换执行引擎：
+
+- `APP_EVAL_ENGINE`
 
 ## Embedding 与 Rerank
 

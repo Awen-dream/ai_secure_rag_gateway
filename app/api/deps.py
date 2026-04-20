@@ -3,8 +3,10 @@ from functools import lru_cache
 from app.application.admin.service import AdminConsoleService
 from app.application.chat.orchestrator import ChatOrchestrator
 from app.application.context.builder import ContextBuilderService
+from app.application.evaluation.engines import EvaluationExecutionEngine, NativeEvaluationExecutionEngine
 from app.application.evaluation.service import OfflineEvaluationService
 from app.application.generation.service import GenerationService
+from app.application.ingestion.engines import DocumentIngestionEngine, NativeDocumentIngestionEngine
 from app.application.retrieval.llm_reranker import LLMReranker
 from app.application.prompting.builder import PromptBuilderService
 from app.application.retrieval.rerank import RetrievalRerankService
@@ -30,6 +32,8 @@ from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.db.repositories.base import MetadataRepository
 from app.infrastructure.db.repositories.sqlite import SQLiteRepository
 from app.infrastructure.external_sources.feishu import FeishuClient
+from app.infrastructure.frameworks.llamaindex_eval import LlamaIndexEvaluationExecutionEngine
+from app.infrastructure.frameworks.llamaindex_ingestion import LlamaIndexDocumentIngestionEngine
 from app.infrastructure.llm.deepseek_client import DeepSeekClient
 from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
@@ -171,7 +175,17 @@ def get_document_ingestion_orchestrator() -> DocumentIngestionOrchestrator:
         indexing_service=get_indexing_service(),
         source_store=get_document_source_store(),
         retrieval_cache=get_retrieval_cache(),
+        ingestion_engine=get_document_ingestion_engine(),
     )
+
+
+@lru_cache
+def get_document_ingestion_engine() -> DocumentIngestionEngine:
+    """Return the configured document-ingestion execution engine."""
+
+    if settings.ingestion_engine == "llamaindex":
+        return LlamaIndexDocumentIngestionEngine()
+    return NativeDocumentIngestionEngine()
 
 
 @lru_cache
@@ -265,7 +279,17 @@ def get_offline_evaluation_service() -> OfflineEvaluationService:
         context_builder=get_context_builder_service(),
         prompt_builder=get_prompt_builder_service(),
         generation_service=get_generation_service(),
+        execution_engine=get_evaluation_execution_engine(),
     )
+
+
+@lru_cache
+def get_evaluation_execution_engine() -> EvaluationExecutionEngine:
+    """Return the configured evaluation execution engine."""
+
+    if settings.evaluation_engine == "llamaindex":
+        return LlamaIndexEvaluationExecutionEngine()
+    return NativeEvaluationExecutionEngine()
 
 
 @lru_cache

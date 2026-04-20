@@ -5,9 +5,9 @@ from collections import Counter
 from datetime import datetime
 
 from app.application.context.builder import ContextBuilderService
+from app.application.evaluation.engines import EvaluationExecutionEngine, NativeEvaluationExecutionEngine
 from app.application.generation.service import GenerationService
 from app.application.prompting.builder import PromptBuilderService
-from app.domain.auth.models import UserContext
 from app.domain.evaluation.models import (
     EvalBulkAnnotationRequest,
     EvalBulkAnnotationResult,
@@ -32,9 +32,7 @@ from app.domain.evaluation.models import (
     ShadowEvalCaseDiff,
     ShadowEvalRunResult,
 )
-from app.domain.retrieval.rerankers import HeuristicReranker
 from app.domain.retrieval.services import RetrievalService
-from app.domain.risk.models import RiskAction
 from app.infrastructure.storage.local_eval_baseline_store import LocalEvalBaselineStore
 from app.infrastructure.storage.local_eval_dataset_store import LocalEvalDatasetStore
 from app.infrastructure.storage.local_eval_run_store import LocalEvalRunStore
@@ -56,6 +54,7 @@ class OfflineEvaluationService:
         context_builder: ContextBuilderService,
         prompt_builder: PromptBuilderService,
         generation_service: GenerationService,
+        execution_engine: EvaluationExecutionEngine | None = None,
     ) -> None:
         self.dataset_store = dataset_store
         self.baseline_store = baseline_store
@@ -64,6 +63,7 @@ class OfflineEvaluationService:
         self.context_builder = context_builder
         self.prompt_builder = prompt_builder
         self.generation_service = generation_service
+        self.execution_engine = execution_engine or NativeEvaluationExecutionEngine()
 
     def list_samples(self) -> list[EvalSample]:
         return self.dataset_store.list_samples()
@@ -475,81 +475,16 @@ class OfflineEvaluationService:
         return run
 
     def _run_case(self, sample: EvalSample, retrieval_service: RetrievalService | None = None) -> EvalCaseResult:
-        started_at = utcnow()
-        user = UserContext(
-            user_id=sample.user_id,
-            tenant_id=sample.tenant_id,
-            department_id=sample.department_id,
-            role=sample.role,
-            clearance_level=sample.clearance_level,
-        )
-        active_retrieval = retrieval_service or self.retrieval_service
-        explanation = active_retrieval.explain(user, sample.query, top_k=5)
-        assembled_context = self.context_builder.build(explanation.results)
-        prompt_build = self.prompt_builder.build_chat_prompt(
-            scene=sample.scene,
-            query=explanation.rewritten_query,
-            assembled_context=assembled_context,
-            session_summary="",
-        )
-        generation = self.generation_service.generate_chat_answer(
-            user=user,
-            prompt_build=prompt_build,
-            input_risk_action=RiskAction.ALLOW,
-            input_risk_level="low",
-        )
-
-        matched_doc_ids = [
-            result.document.id
-            for result in explanation.results
-            if result.document.id in set(sample.expected_doc_ids)
-        ]
-        matched_titles = [
-            result.document.title
-            for result in explanation.results
-            if result.document.title in set(sample.expected_titles)
-        ]
-        answer_contains_expected = all(term in generation.answer for term in sample.expected_answer_contains)
-        latency_ms = int((utcnow() - started_at).total_seconds() * 1000)
-
-        return EvalCaseResult(
-            sample_id=sample.id,
-            query=sample.query,
-            scene=sample.scene,
-            hit_expected_doc=bool(matched_doc_ids) if sample.expected_doc_ids else False,
-            hit_expected_title=bool(matched_titles) if sample.expected_titles else False,
-            answer_contains_expected=answer_contains_expected if sample.expected_answer_contains else False,
-            answer_valid=generation.validation_result.valid,
-            matched_doc_ids=matched_doc_ids,
-            matched_titles=matched_titles,
-            retrieved_chunks=len(explanation.results),
-            rewritten_query=explanation.rewritten_query,
-            intent=explanation.intent,
-            latency_ms=latency_ms,
-            validation_missing_sections=generation.validation_result.missing_sections,
-            answer_preview=generation.answer[:240],
-            citations=[item.title for item in assembled_context.citations],
+        return self.execution_engine.run_case(
+            sample=sample,
+            retrieval_service=retrieval_service or self.retrieval_service,
+            context_builder=self.context_builder,
+            prompt_builder=self.prompt_builder,
+            generation_service=self.generation_service,
         )
 
     def _build_shadow_retrieval_service(self) -> RetrievalService:
-        required_attributes = (
-            "document_service",
-            "keyword_backend",
-            "vector_backend",
-            "query_planning",
-            "recall_planning",
-        )
-        if not all(hasattr(self.retrieval_service, attribute) for attribute in required_attributes):
-            return self.retrieval_service
-        return RetrievalService(
-            document_service=self.retrieval_service.document_service,
-            keyword_backend=self.retrieval_service.keyword_backend,
-            vector_backend=self.retrieval_service.vector_backend,
-            retrieval_cache=None,
-            reranker=HeuristicReranker(mode="heuristic", top_n=8),
-            query_planning=self.retrieval_service.query_planning,
-            recall_planning=self.retrieval_service.recall_planning,
-        )
+        return self.execution_engine.build_shadow_retrieval_service(self.retrieval_service)
 
     def _load_latest_run_payload(self, mode: str) -> dict | None:
         for item in self.run_store.list_runs(limit=50):
