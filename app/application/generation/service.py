@@ -58,6 +58,15 @@ class GenerationService:
             validation_result=validation,
         )
 
+    def resolve_runtime_label(self) -> str:
+        """Return the effective LLM runtime label used by this generation service."""
+
+        resolver = getattr(self.llm_client, "resolve_runtime_label", None)
+        if callable(resolver):
+            return str(resolver())
+        runtime_name = str(getattr(self.llm_client, "runtime_name", "native"))
+        return runtime_name if self.llm_client.can_execute() else f"{runtime_name}_fallback"
+
     def _generate_raw_answer(self, prompt_build: PromptBuildResult, risk_action: RiskAction) -> str:
         assembled_context = prompt_build.assembled_context
         if risk_action == RiskAction.REFUSE:

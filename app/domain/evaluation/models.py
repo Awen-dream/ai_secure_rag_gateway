@@ -154,6 +154,16 @@ class ShadowEvalCaseDiff(BaseModel):
     shadow_rewritten_query: str = ""
 
 
+class FrameworkRuntimeSnapshot(BaseModel):
+    label: str = ""
+    ingestion_engine: str = ""
+    evaluation_engine: str = ""
+    llm_runtime: str = ""
+    embedding_runtime: str = ""
+    source_sync_engine: str = ""
+    retrieval_variant: str = ""
+
+
 class ShadowEvalRunResult(BaseModel):
     run_id: str = ""
     mode: str = "shadow"
@@ -162,6 +172,8 @@ class ShadowEvalRunResult(BaseModel):
     finished_at: datetime
     primary_summary: EvalRunSummary
     shadow_summary: EvalRunSummary
+    primary_runtime: FrameworkRuntimeSnapshot = Field(default_factory=FrameworkRuntimeSnapshot)
+    shadow_runtime: FrameworkRuntimeSnapshot = Field(default_factory=FrameworkRuntimeSnapshot)
     winner: str = "tie"
     winner_reasons: list[str] = Field(default_factory=list)
     primary_wins: int = 0
@@ -204,6 +216,8 @@ class ShadowReportSummary(BaseModel):
     latest_run_id: str = ""
     winner: str = "unavailable"
     recommendation: str = "unavailable"
+    primary_runtime: FrameworkRuntimeSnapshot = Field(default_factory=FrameworkRuntimeSnapshot)
+    shadow_runtime: FrameworkRuntimeSnapshot = Field(default_factory=FrameworkRuntimeSnapshot)
     primary_wins: int = 0
     shadow_wins: int = 0
     ties: int = 0

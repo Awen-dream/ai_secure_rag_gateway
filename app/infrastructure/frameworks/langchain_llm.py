@@ -10,6 +10,8 @@ from app.infrastructure.llm.openai_client import OpenAIClient
 class LangChainChatClientAdapter(OpenAICompatibleChatClient):
     """LangChain-backed chat client for OpenAI-compatible providers with native fallback semantics."""
 
+    runtime_name = "langchain"
+
     def __init__(
         self,
         provider: str,
@@ -90,6 +92,8 @@ class LangChainChatClientAdapter(OpenAICompatibleChatClient):
 
 class LangChainOpenAIResponsesAdapter(OpenAIClient):
     """LangChain-backed OpenAI adapter that preserves the OpenAI provider name for router compatibility."""
+
+    runtime_name = "langchain"
 
     def __init__(
         self,

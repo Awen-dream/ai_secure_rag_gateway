@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -5,7 +7,13 @@ from pathlib import Path
 from app.application.context.builder import AssembledContext
 from app.application.evaluation.service import OfflineEvaluationService
 from app.domain.citations.services import Citation
-from app.domain.evaluation.models import EvalBulkAnnotationRequest, EvalRunResult, EvalRunSummary, EvalSample
+from app.domain.evaluation.models import (
+    EvalBulkAnnotationRequest,
+    EvalRunResult,
+    EvalRunSummary,
+    EvalSample,
+    FrameworkRuntimeSnapshot,
+)
 from app.domain.prompts.models import PromptTemplate, PromptValidationResult, RenderedPrompt
 from app.domain.risk.models import RiskAction
 from app.infrastructure.storage.local_eval_baseline_store import LocalEvalBaselineStore
@@ -125,6 +133,25 @@ class _GenerationServiceStub:
         )()
 
 
+class _ShadowGenerationServiceStub:
+    def generate_chat_answer(self, user, prompt_build, input_risk_action, input_risk_level):
+        return type(
+            "GenerationResult",
+            (),
+            {
+                "answer": "结论：暂无法确认审批时限。\n依据：[1] 报销制度。\n引用来源：[1] 报销制度 / 审批规则 / v1\n限制说明：当前答案未命中标准关键词。",
+                "validation_result": PromptValidationResult(
+                    template_id="prompt_standard_v1",
+                    template_version=1,
+                    valid=True,
+                    missing_sections=[],
+                    normalized_answer="ok",
+                ),
+                "action": RiskAction.ALLOW,
+            },
+        )()
+
+
 class OfflineEvaluationServiceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dataset_path = Path("/tmp/secure_rag_gateway_eval_dataset.jsonl")
@@ -136,11 +163,18 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
             for path in self.runs_dir.glob("*.json"):
                 path.unlink()
 
-    def _build_service(self) -> OfflineEvaluationService:
+    def _build_service(
+        self,
+        shadow_generation_service=None,
+        primary_runtime_snapshot: FrameworkRuntimeSnapshot | None = None,
+        shadow_runtime_snapshot: FrameworkRuntimeSnapshot | None = None,
+        samples: list[EvalSample] | None = None,
+    ) -> OfflineEvaluationService:
         store = LocalEvalDatasetStore(str(self.dataset_path))
         run_store = LocalEvalRunStore(str(self.runs_dir))
         store.replace_samples(
-            [
+            samples
+            or [
                 EvalSample(
                     id="case_1",
                     query="报销审批时限是什么？",
@@ -158,6 +192,9 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
             context_builder=_ContextBuilderStub(),
             prompt_builder=_PromptBuilderStub(),
             generation_service=_GenerationServiceStub(),
+            shadow_generation_service=shadow_generation_service,
+            primary_runtime_snapshot=primary_runtime_snapshot,
+            shadow_runtime_snapshot=shadow_runtime_snapshot,
         )
 
     def test_run_returns_summary_and_case_results(self) -> None:
@@ -204,6 +241,58 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertIn("primary_summary", loaded)
         self.assertIn("shadow_summary", loaded)
         self.assertIn("winner", loaded)
+
+    def test_run_shadow_can_use_dedicated_generation_runtime_and_runtime_snapshots(self) -> None:
+        service = self._build_service(
+            shadow_generation_service=_ShadowGenerationServiceStub(),
+            primary_runtime_snapshot=FrameworkRuntimeSnapshot(
+                label="primary",
+                evaluation_engine="native",
+                llm_runtime="native",
+                retrieval_variant="primary",
+            ),
+            shadow_runtime_snapshot=FrameworkRuntimeSnapshot(
+                label="shadow",
+                evaluation_engine="llamaindex",
+                llm_runtime="langchain",
+                retrieval_variant="shadow",
+            ),
+        )
+
+        run = service.run_shadow()
+
+        self.assertEqual(run.primary_runtime.llm_runtime, "native")
+        self.assertEqual(run.shadow_runtime.llm_runtime, "langchain")
+        self.assertEqual(run.shadow_runtime.evaluation_engine, "llamaindex")
+        self.assertTrue(run.diffs[0].primary_answer_match)
+        self.assertFalse(run.diffs[0].shadow_answer_match)
+        self.assertEqual(run.winner, "primary")
+
+    def test_run_shadow_excludes_archived_samples_like_offline_run(self) -> None:
+        service = self._build_service(
+            samples=[
+                EvalSample(
+                    id="case_active",
+                    query="报销审批时限是什么？",
+                    expected_doc_ids=["doc_finance"],
+                    expected_titles=["报销制度"],
+                    expected_answer_contains=["3个工作日"],
+                ),
+                EvalSample(
+                    id="case_archived",
+                    query="这条不应该参与评测",
+                    status="archived",
+                ),
+            ]
+        )
+
+        offline = service.run()
+        shadow = service.run_shadow()
+
+        self.assertEqual(offline.dataset_size, 1)
+        self.assertEqual(shadow.dataset_size, 1)
+        self.assertEqual(len(shadow.diffs), 1)
+        self.assertEqual(shadow.diffs[0].sample_id, "case_active")
 
     def test_build_trend_summary_detects_regression_alerts(self) -> None:
         service = self._build_service()
@@ -266,6 +355,8 @@ class OfflineEvaluationServiceTest(unittest.TestCase):
         self.assertEqual(shadow_report.latest_run_id, shadow_run.run_id)
         self.assertEqual(shadow_report.winner, "tie")
         self.assertEqual(shadow_report.recommendation, "keep_primary")
+        self.assertEqual(shadow_report.primary_runtime.label, "primary")
+        self.assertEqual(shadow_report.shadow_runtime.label, "shadow")
         self.assertEqual(release_report.latest_offline_run_id, offline_run.run_id)
         self.assertEqual(release_report.latest_shadow_run_id, shadow_run.run_id)
         self.assertEqual(release_report.decision, "ready")

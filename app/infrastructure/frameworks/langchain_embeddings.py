@@ -9,6 +9,8 @@ from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
 class LangChainEmbeddingAdapter(OpenAIEmbeddingClient):
     """LangChain-backed embedding adapter that preserves the current embedding client interface."""
 
+    runtime_name = "langchain"
+
     def __init__(
         self,
         api_key: str | None,

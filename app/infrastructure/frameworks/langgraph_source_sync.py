@@ -9,6 +9,15 @@ class LangGraphSourceSyncWorkflow:
 
     engine_name = "langgraph"
 
+    def resolve_runtime_label(self) -> str:
+        """Return the effective source-sync runtime after LangGraph dependency resolution."""
+
+        try:
+            graph_module = import_module("langgraph.graph")
+        except Exception:
+            return "native_fallback"
+        return self.engine_name if getattr(graph_module, "StateGraph", None) is not None else "native_fallback"
+
     def build_run_sync_job_workflow(self, run_sync_job_callable) -> Any | None:
         try:
             graph_module = import_module("langgraph.graph")

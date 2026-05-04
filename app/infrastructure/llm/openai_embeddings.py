@@ -9,6 +9,7 @@ class OpenAIEmbeddingClient:
     """Thin embeddings API adapter with safe fallback behavior for local development."""
 
     provider = "openai"
+    runtime_name = "native"
 
     def __init__(
         self,
@@ -30,6 +31,11 @@ class OpenAIEmbeddingClient:
         """Return whether the client is configured to call a real embeddings API."""
 
         return self.enabled and bool(self.api_key)
+
+    def resolve_runtime_label(self) -> str:
+        """Return the effective embedding runtime label, including fallback cases."""
+
+        return self.runtime_name if self.can_execute() else f"{self.runtime_name}_fallback"
 
     def build_payload(self, texts: Sequence[str]) -> dict[str, Any]:
         """Build one embeddings API request body for the provided texts."""

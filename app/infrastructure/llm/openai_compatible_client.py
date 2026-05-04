@@ -9,6 +9,7 @@ class OpenAICompatibleChatClient:
     """Call OpenAI-compatible `/chat/completions` providers and normalize text output."""
 
     provider = "openai-compatible"
+    runtime_name = "native"
 
     def __init__(
         self,
@@ -32,6 +33,11 @@ class OpenAICompatibleChatClient:
         """Return whether the client is configured to call a remote provider."""
 
         return bool(self.api_key)
+
+    def resolve_runtime_label(self) -> str:
+        """Return the effective runtime label, including local fallback cases."""
+
+        return self.runtime_name if self.can_execute() else f"{self.runtime_name}_fallback"
 
     def build_payload(self, instructions: str, input_text: str) -> dict[str, Any]:
         """Build one OpenAI-compatible chat completions request body."""

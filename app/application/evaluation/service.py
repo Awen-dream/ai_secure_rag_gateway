@@ -25,6 +25,7 @@ from app.domain.evaluation.models import (
     EvalSampleTemplate,
     EvalTrendSummary,
     EvalSample,
+    FrameworkRuntimeSnapshot,
     ReleaseGateCheck,
     ReleaseGateReport,
     ReleaseReadinessReport,
@@ -55,6 +56,10 @@ class OfflineEvaluationService:
         prompt_builder: PromptBuilderService,
         generation_service: GenerationService,
         execution_engine: EvaluationExecutionEngine | None = None,
+        shadow_generation_service: GenerationService | None = None,
+        shadow_execution_engine: EvaluationExecutionEngine | None = None,
+        primary_runtime_snapshot: FrameworkRuntimeSnapshot | None = None,
+        shadow_runtime_snapshot: FrameworkRuntimeSnapshot | None = None,
     ) -> None:
         self.dataset_store = dataset_store
         self.baseline_store = baseline_store
@@ -64,6 +69,18 @@ class OfflineEvaluationService:
         self.prompt_builder = prompt_builder
         self.generation_service = generation_service
         self.execution_engine = execution_engine or NativeEvaluationExecutionEngine()
+        self.shadow_generation_service = shadow_generation_service or generation_service
+        self.shadow_execution_engine = shadow_execution_engine or self.execution_engine
+        self.primary_runtime_snapshot = primary_runtime_snapshot or FrameworkRuntimeSnapshot(
+            label="primary",
+            evaluation_engine=getattr(self.execution_engine, "engine_name", "native"),
+            retrieval_variant="primary",
+        )
+        self.shadow_runtime_snapshot = shadow_runtime_snapshot or FrameworkRuntimeSnapshot(
+            label="shadow",
+            evaluation_engine=getattr(self.shadow_execution_engine, "engine_name", "native"),
+            retrieval_variant="shadow",
+        )
 
     def list_samples(self) -> list[EvalSample]:
         return self.dataset_store.list_samples()
@@ -231,6 +248,8 @@ class OfflineEvaluationService:
             latest_run_id=str(latest_shadow_payload.get("run_id", "")),
             winner=winner,
             recommendation=recommendation,
+            primary_runtime=FrameworkRuntimeSnapshot.model_validate(latest_shadow_payload.get("primary_runtime", {})),
+            shadow_runtime=FrameworkRuntimeSnapshot.model_validate(latest_shadow_payload.get("shadow_runtime", {})),
             primary_wins=int(latest_shadow_payload.get("primary_wins", 0)),
             shadow_wins=int(latest_shadow_payload.get("shadow_wins", 0)),
             ties=int(latest_shadow_payload.get("ties", 0)),
@@ -398,7 +417,7 @@ class OfflineEvaluationService:
 
     def run(self, limit: int | None = None, persist: bool = True) -> EvalRunResult:
         started_at = utcnow()
-        samples = [sample for sample in self.dataset_store.list_samples() if sample.status != "archived"]
+        samples = self._list_active_samples()
         if limit is not None:
             samples = samples[:limit]
 
@@ -421,13 +440,29 @@ class OfflineEvaluationService:
 
     def run_shadow(self, limit: int | None = None, persist: bool = True) -> ShadowEvalRunResult:
         started_at = utcnow()
-        samples = self.dataset_store.list_samples()
+        samples = self._list_active_samples()
         if limit is not None:
             samples = samples[:limit]
 
-        primary_cases = [self._run_case(sample, retrieval_service=self.retrieval_service) for sample in samples]
-        shadow_service = self._build_shadow_retrieval_service()
-        shadow_cases = [self._run_case(sample, retrieval_service=shadow_service) for sample in samples]
+        primary_cases = [
+            self._run_case(
+                sample,
+                retrieval_service=self.retrieval_service,
+                generation_service=self.generation_service,
+                execution_engine=self.execution_engine,
+            )
+            for sample in samples
+        ]
+        shadow_service = self._build_shadow_retrieval_service(self.shadow_execution_engine)
+        shadow_cases = [
+            self._run_case(
+                sample,
+                retrieval_service=shadow_service,
+                generation_service=self.shadow_generation_service,
+                execution_engine=self.shadow_execution_engine,
+            )
+            for sample in samples
+        ]
         primary_summary = self._summarize(primary_cases)
         shadow_summary = self._summarize(shadow_cases)
         diffs = [
@@ -463,6 +498,8 @@ class OfflineEvaluationService:
             finished_at=finished_at,
             primary_summary=primary_summary,
             shadow_summary=shadow_summary,
+            primary_runtime=self.primary_runtime_snapshot,
+            shadow_runtime=self.shadow_runtime_snapshot,
             winner=winner,
             winner_reasons=winner_reasons,
             primary_wins=primary_wins,
@@ -474,17 +511,28 @@ class OfflineEvaluationService:
             self.run_store.save_run(run.run_id, run.model_dump(mode="json"))
         return run
 
-    def _run_case(self, sample: EvalSample, retrieval_service: RetrievalService | None = None) -> EvalCaseResult:
-        return self.execution_engine.run_case(
+    def _run_case(
+        self,
+        sample: EvalSample,
+        retrieval_service: RetrievalService | None = None,
+        generation_service: GenerationService | None = None,
+        execution_engine: EvaluationExecutionEngine | None = None,
+    ) -> EvalCaseResult:
+        selected_engine = execution_engine or self.execution_engine
+        return selected_engine.run_case(
             sample=sample,
             retrieval_service=retrieval_service or self.retrieval_service,
             context_builder=self.context_builder,
             prompt_builder=self.prompt_builder,
-            generation_service=self.generation_service,
+            generation_service=generation_service or self.generation_service,
         )
 
-    def _build_shadow_retrieval_service(self) -> RetrievalService:
-        return self.execution_engine.build_shadow_retrieval_service(self.retrieval_service)
+    def _build_shadow_retrieval_service(
+        self,
+        execution_engine: EvaluationExecutionEngine | None = None,
+    ) -> RetrievalService:
+        selected_engine = execution_engine or self.shadow_execution_engine
+        return selected_engine.build_shadow_retrieval_service(self.retrieval_service)
 
     def _load_latest_run_payload(self, mode: str) -> dict | None:
         for item in self.run_store.list_runs(limit=50):
@@ -494,6 +542,9 @@ class OfflineEvaluationService:
             if payload is not None:
                 return payload
         return None
+
+    def _list_active_samples(self) -> list[EvalSample]:
+        return [sample for sample in self.dataset_store.list_samples() if sample.status != "archived"]
 
     @staticmethod
     def _summarize(cases: list[EvalCaseResult]) -> EvalRunSummary:

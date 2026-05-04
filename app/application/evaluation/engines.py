@@ -36,11 +36,19 @@ class EvaluationExecutionEngine(Protocol):
     def build_shadow_retrieval_service(self, retrieval_service: RetrievalService) -> RetrievalService:
         ...
 
+    def resolve_runtime_label(self) -> str:
+        ...
+
 
 class NativeEvaluationExecutionEngine:
     """Default evaluation engine that reuses the current retrieval and generation stack."""
 
     engine_name = "native"
+
+    def resolve_runtime_label(self) -> str:
+        """Return the effective evaluation runtime label."""
+
+        return self.engine_name
 
     def run_case(
         self,

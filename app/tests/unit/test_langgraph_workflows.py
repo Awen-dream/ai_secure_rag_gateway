@@ -85,6 +85,30 @@ class LangGraphWorkflowTest(unittest.TestCase):
         self.assertIsNotNone(workflow)
         self.assertTrue(hasattr(workflow, "invoke"))
 
+    def test_langgraph_runtime_labels_reflect_dependency_availability(self) -> None:
+        ingestion_engine = LangGraphDocumentIngestionEngine()
+        source_sync_workflow = LangGraphSourceSyncWorkflow()
+
+        with patch(
+            "app.infrastructure.frameworks.langgraph_ingestion.import_module",
+            return_value=SimpleNamespace(StateGraph=_FakeStateGraph, END="END"),
+        ), patch(
+            "app.infrastructure.frameworks.langgraph_source_sync.import_module",
+            return_value=SimpleNamespace(StateGraph=_FakeStateGraph, END="END"),
+        ):
+            self.assertEqual(ingestion_engine.resolve_runtime_label(), "langgraph")
+            self.assertEqual(source_sync_workflow.resolve_runtime_label(), "langgraph")
+
+        with patch(
+            "app.infrastructure.frameworks.langgraph_ingestion.import_module",
+            side_effect=ImportError(),
+        ), patch(
+            "app.infrastructure.frameworks.langgraph_source_sync.import_module",
+            side_effect=ImportError(),
+        ):
+            self.assertEqual(ingestion_engine.resolve_runtime_label(), "native_fallback")
+            self.assertEqual(source_sync_workflow.resolve_runtime_label(), "native_fallback")
+
     def test_langgraph_source_sync_workflow_wraps_native_run(self) -> None:
         workflow_builder = LangGraphSourceSyncWorkflow()
         with patch(

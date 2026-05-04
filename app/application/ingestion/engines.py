@@ -33,11 +33,19 @@ class DocumentIngestionEngine(Protocol):
     ) -> DocumentRecord:
         ...
 
+    def resolve_runtime_label(self) -> str:
+        ...
+
 
 class NativeDocumentIngestionEngine:
     """Default ingestion engine that preserves the current in-process parser/chunker/indexer flow."""
 
     engine_name = "native"
+
+    def resolve_runtime_label(self) -> str:
+        """Return the effective ingestion runtime label."""
+
+        return self.engine_name
 
     def process_document(
         self,

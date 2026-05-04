@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.application.query.retrieval_cache import RetrievalCache
 from app.domain.audit.services import AuditService
 from app.domain.documents.services import DocumentService
+from app.domain.evaluation.models import FrameworkRuntimeSnapshot
 from app.domain.prompts.template_service import PromptTemplateService
 from app.domain.retrieval.indexing import RetrievalIndexingService
 from app.domain.retrieval.rerankers import CompositeReranker, HeuristicReranker, RetrievalReranker
@@ -40,6 +41,7 @@ from app.infrastructure.frameworks.langchain_llm import LangChainChatClientAdapt
 from app.infrastructure.frameworks.langgraph_ingestion import LangGraphDocumentIngestionEngine
 from app.infrastructure.frameworks.langgraph_source_sync import LangGraphSourceSyncWorkflow
 from app.infrastructure.llm.deepseek_client import DeepSeekClient
+from app.infrastructure.llm.base import LLMClient
 from app.infrastructure.llm.openai_client import OpenAIClient
 from app.infrastructure.llm.openai_embeddings import OpenAIEmbeddingClient
 from app.infrastructure.llm.qwen_client import QwenClient
@@ -275,8 +277,28 @@ def get_generation_service() -> GenerationService:
 
 
 @lru_cache
+def get_shadow_generation_service() -> GenerationService:
+    """Return the generation service used by shadow evaluation when a different LLM runtime is configured."""
+
+    shadow_runtime = settings.shadow_eval_llm_runtime or settings.llm_runtime
+    return GenerationService(
+        prompt_template_service=get_prompt_template_service(),
+        output_guard=get_output_guard(),
+        llm_client=_build_llm_router(shadow_runtime).get_client("generation"),
+    )
+
+
+@lru_cache
 def get_offline_evaluation_service() -> OfflineEvaluationService:
     """Return the offline evaluation service used by admin evaluation endpoints."""
+
+    primary_generation_service = get_generation_service()
+    shadow_generation_service = get_shadow_generation_service()
+    primary_execution_engine = get_evaluation_execution_engine()
+    shadow_execution_engine = get_shadow_evaluation_execution_engine()
+    ingestion_engine = get_document_ingestion_engine()
+    source_sync_workflow = get_source_sync_workflow()
+    embedding_client = get_embedding_client()
 
     return OfflineEvaluationService(
         dataset_store=get_eval_dataset_store(),
@@ -285,8 +307,38 @@ def get_offline_evaluation_service() -> OfflineEvaluationService:
         retrieval_service=get_retrieval_service(),
         context_builder=get_context_builder_service(),
         prompt_builder=get_prompt_builder_service(),
-        generation_service=get_generation_service(),
-        execution_engine=get_evaluation_execution_engine(),
+        generation_service=primary_generation_service,
+        execution_engine=primary_execution_engine,
+        shadow_generation_service=shadow_generation_service,
+        shadow_execution_engine=shadow_execution_engine,
+        primary_runtime_snapshot=_build_runtime_snapshot(
+            label="primary",
+            retrieval_variant="primary",
+            configured_evaluation_runtime=settings.evaluation_engine,
+            configured_llm_runtime=settings.llm_runtime,
+            configured_ingestion_runtime=settings.ingestion_engine,
+            configured_embedding_runtime=settings.embedding_runtime,
+            configured_source_sync_runtime=settings.source_sync_engine,
+            generation_service=primary_generation_service,
+            execution_engine=primary_execution_engine,
+            ingestion_engine=ingestion_engine,
+            embedding_client=embedding_client,
+            source_sync_workflow=source_sync_workflow,
+        ),
+        shadow_runtime_snapshot=_build_runtime_snapshot(
+            label="shadow",
+            retrieval_variant="shadow",
+            configured_evaluation_runtime=settings.shadow_eval_engine or settings.evaluation_engine,
+            configured_llm_runtime=settings.shadow_eval_llm_runtime or settings.llm_runtime,
+            configured_ingestion_runtime=settings.ingestion_engine,
+            configured_embedding_runtime=settings.embedding_runtime,
+            configured_source_sync_runtime=settings.source_sync_engine,
+            generation_service=shadow_generation_service,
+            execution_engine=shadow_execution_engine,
+            ingestion_engine=ingestion_engine,
+            embedding_client=embedding_client,
+            source_sync_workflow=source_sync_workflow,
+        ),
     )
 
 
@@ -295,6 +347,16 @@ def get_evaluation_execution_engine() -> EvaluationExecutionEngine:
     """Return the configured evaluation execution engine."""
 
     if settings.evaluation_engine == "llamaindex":
+        return LlamaIndexEvaluationExecutionEngine()
+    return NativeEvaluationExecutionEngine()
+
+
+@lru_cache
+def get_shadow_evaluation_execution_engine() -> EvaluationExecutionEngine:
+    """Return the evaluation execution engine used by shadow runs."""
+
+    shadow_engine = settings.shadow_eval_engine or settings.evaluation_engine
+    if shadow_engine == "llamaindex":
         return LlamaIndexEvaluationExecutionEngine()
     return NativeEvaluationExecutionEngine()
 
@@ -325,10 +387,48 @@ def get_audit_service() -> AuditService:
 
 
 @lru_cache
-def get_openai_client() -> OpenAIClient:
+def get_openai_client() -> LLMClient:
     """Return the OpenAI Responses API adapter used by the chat service."""
 
-    if settings.llm_runtime == "langchain":
+    return _build_openai_client(settings.llm_runtime)
+
+
+def get_qwen_client() -> LLMClient:
+    """Return the Qwen client wired against Alibaba Cloud's OpenAI-compatible chat API."""
+
+    return _build_qwen_client(settings.llm_runtime)
+
+
+def get_deepseek_client() -> LLMClient:
+    """Return the DeepSeek client wired against its OpenAI-compatible chat API."""
+
+    return _build_deepseek_client(settings.llm_runtime)
+
+
+def get_llm_router() -> LLMRouter:
+    """Return the per-purpose LLM router used by generation, rerank and understanding."""
+
+    return _build_llm_router(settings.llm_runtime)
+
+
+def _build_llm_router(runtime: str) -> LLMRouter:
+    return LLMRouter.build(
+        default_provider=settings.llm_default_provider,
+        generation_provider=settings.llm_generation_provider or settings.llm_default_provider,
+        query_understanding_provider=(
+            settings.llm_query_understanding_provider or settings.llm_default_provider
+        ),
+        reranker_provider=settings.llm_reranker_provider or settings.llm_default_provider,
+        clients=[
+            _build_openai_client(runtime),
+            _build_qwen_client(runtime),
+            _build_deepseek_client(runtime),
+        ],
+    )
+
+
+def _build_openai_client(runtime: str) -> LLMClient:
+    if runtime == "langchain":
         return LangChainOpenAIResponsesAdapter(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
@@ -347,10 +447,8 @@ def get_openai_client() -> OpenAIClient:
     )
 
 
-def get_qwen_client() -> QwenClient:
-    """Return the Qwen client wired against Alibaba Cloud's OpenAI-compatible chat API."""
-
-    if settings.llm_runtime == "langchain":
+def _build_qwen_client(runtime: str) -> LLMClient:
+    if runtime == "langchain":
         return LangChainChatClientAdapter(
             provider="qwen",
             api_key=settings.qwen_api_key,
@@ -370,10 +468,8 @@ def get_qwen_client() -> QwenClient:
     )
 
 
-def get_deepseek_client() -> DeepSeekClient:
-    """Return the DeepSeek client wired against its OpenAI-compatible chat API."""
-
-    if settings.llm_runtime == "langchain":
+def _build_deepseek_client(runtime: str) -> LLMClient:
+    if runtime == "langchain":
         return LangChainChatClientAdapter(
             provider="deepseek",
             api_key=settings.deepseek_api_key,
@@ -393,22 +489,62 @@ def get_deepseek_client() -> DeepSeekClient:
     )
 
 
-def get_llm_router() -> LLMRouter:
-    """Return the per-purpose LLM router used by generation, rerank and understanding."""
-
-    return LLMRouter.build(
-        default_provider=settings.llm_default_provider,
-        generation_provider=settings.llm_generation_provider or settings.llm_default_provider,
-        query_understanding_provider=(
-            settings.llm_query_understanding_provider or settings.llm_default_provider
-        ),
-        reranker_provider=settings.llm_reranker_provider or settings.llm_default_provider,
-        clients=[
-            get_openai_client(),
-            get_qwen_client(),
-            get_deepseek_client(),
-        ],
+def _build_runtime_snapshot(
+    *,
+    label: str,
+    retrieval_variant: str,
+    configured_evaluation_runtime: str,
+    configured_llm_runtime: str,
+    configured_ingestion_runtime: str,
+    configured_embedding_runtime: str,
+    configured_source_sync_runtime: str,
+    generation_service: GenerationService,
+    execution_engine: EvaluationExecutionEngine,
+    ingestion_engine: DocumentIngestionEngine,
+    embedding_client: OpenAIEmbeddingClient,
+    source_sync_workflow: Optional[LangGraphSourceSyncWorkflow],
+) -> FrameworkRuntimeSnapshot:
+    return FrameworkRuntimeSnapshot(
+        label=label,
+        ingestion_engine=_resolve_component_runtime(ingestion_engine, configured_ingestion_runtime),
+        evaluation_engine=_resolve_component_runtime(execution_engine, configured_evaluation_runtime),
+        llm_runtime=_resolve_generation_runtime(generation_service, configured_llm_runtime),
+        embedding_runtime=_resolve_component_runtime(embedding_client, configured_embedding_runtime),
+        source_sync_engine=_resolve_component_runtime(source_sync_workflow, configured_source_sync_runtime),
+        retrieval_variant=retrieval_variant,
     )
+
+
+def _resolve_generation_runtime(generation_service: GenerationService, configured_runtime: str) -> str:
+    resolver = getattr(generation_service, "resolve_runtime_label", None)
+    if callable(resolver):
+        try:
+            resolved = resolver()
+        except Exception:
+            resolved = None
+        if resolved:
+            return str(resolved)
+    return configured_runtime or "native"
+
+
+def _resolve_component_runtime(component: object, configured_runtime: str) -> str:
+    if component is None:
+        return configured_runtime or "native"
+
+    resolver = getattr(component, "resolve_runtime_label", None)
+    if callable(resolver):
+        try:
+            resolved = resolver()
+        except Exception:
+            resolved = None
+        if resolved:
+            return str(resolved)
+
+    for attribute in ("engine_name", "runtime_name"):
+        value = getattr(component, attribute, None)
+        if isinstance(value, str) and value:
+            return value
+    return configured_runtime or "native"
 
 
 @lru_cache

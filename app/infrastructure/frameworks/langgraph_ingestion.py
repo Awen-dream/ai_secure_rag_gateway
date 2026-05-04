@@ -16,6 +16,15 @@ class LangGraphDocumentIngestionEngine(NativeDocumentIngestionEngine):
 
     engine_name = "langgraph"
 
+    def resolve_runtime_label(self) -> str:
+        """Return the effective ingestion runtime after LangGraph dependency resolution."""
+
+        try:
+            graph_module = import_module("langgraph.graph")
+        except Exception:
+            return "native_fallback"
+        return self.engine_name if getattr(graph_module, "StateGraph", None) is not None else "native_fallback"
+
     def process_document(
         self,
         *,

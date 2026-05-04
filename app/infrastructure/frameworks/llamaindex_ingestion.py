@@ -27,6 +27,11 @@ class LlamaIndexDocumentIngestionEngine(NativeDocumentIngestionEngine):
 
     engine_name = "llamaindex"
 
+    def resolve_runtime_label(self) -> str:
+        """Return the effective ingestion runtime after dependency resolution."""
+
+        return self.engine_name if self._load_components() is not None else "native_fallback"
+
     def process_document(
         self,
         *,

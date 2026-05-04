@@ -45,6 +45,7 @@ class LangChainAdapterTest(unittest.TestCase):
             )
 
         self.assertTrue(client.can_execute())
+        self.assertEqual(client.resolve_runtime_label(), "langchain")
         self.assertEqual(client.generate_response("system", "user"), "LangChain 输出")
 
     def test_langchain_embedding_adapter_embeds_texts_when_runtime_available(self) -> None:
@@ -62,8 +63,27 @@ class LangChainAdapterTest(unittest.TestCase):
             )
 
         self.assertTrue(client.can_execute())
+        self.assertEqual(client.resolve_runtime_label(), "langchain")
         self.assertEqual(client.embed_texts(["a", "b"]), [[0.1, 0.2], [0.1, 0.2]])
         self.assertEqual(client.embed_text("a"), [0.3, 0.4])
+
+    def test_langchain_runtime_label_reports_fallback_when_unavailable(self) -> None:
+        with patch(
+            "app.infrastructure.frameworks.langchain_llm.import_module",
+            return_value=SimpleNamespace(ChatOpenAI=_FakeChatOpenAI),
+        ):
+            client = LangChainChatClientAdapter(
+                provider="qwen",
+                api_key=None,
+                model="qwen-plus",
+                base_url="https://example.com/v1",
+                timeout_seconds=10,
+                max_output_tokens=256,
+                temperature=0.1,
+            )
+
+        self.assertFalse(client.can_execute())
+        self.assertEqual(client.resolve_runtime_label(), "langchain_fallback")
 
     def test_langchain_runtime_selection_in_deps(self) -> None:
         from app.api.deps import (

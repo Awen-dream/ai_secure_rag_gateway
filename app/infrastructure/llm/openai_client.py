@@ -9,6 +9,7 @@ class OpenAIClient:
     """Thin Responses API adapter used by the chat service for authorized RAG generation."""
 
     provider = "openai"
+    runtime_name = "native"
 
     def __init__(
         self,
@@ -30,6 +31,11 @@ class OpenAIClient:
         """Return whether the client is configured to call the real OpenAI Responses API."""
 
         return bool(self.api_key)
+
+    def resolve_runtime_label(self) -> str:
+        """Return the effective runtime label, including local fallback cases."""
+
+        return self.runtime_name if self.can_execute() else f"{self.runtime_name}_fallback"
 
     def build_payload(self, instructions: str, input_text: str) -> dict[str, Any]:
         """Build one Responses API request body from rendered prompt instructions and input."""

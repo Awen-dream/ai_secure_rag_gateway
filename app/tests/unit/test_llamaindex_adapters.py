@@ -134,6 +134,12 @@ class LlamaIndexAdapterTest(unittest.TestCase):
         self.assertEqual([chunk.text for chunk in chunks], ["第一块内容", "第二块内容"])
         self.assertEqual(chunks[0].metadata_json["node_parser"], "llamaindex")
 
+    def test_llamaindex_ingestion_runtime_label_reports_fallback_when_components_missing(self) -> None:
+        engine = LlamaIndexDocumentIngestionEngine()
+
+        with patch.object(engine, "_load_components", return_value=None):
+            self.assertEqual(engine.resolve_runtime_label(), "native_fallback")
+
     def test_llamaindex_evaluation_engine_uses_framework_evaluators_when_available(self) -> None:
         engine = LlamaIndexEvaluationExecutionEngine()
         sample = EvalSample(
@@ -219,3 +225,19 @@ class LlamaIndexAdapterTest(unittest.TestCase):
         self.assertIsInstance(result, EvalCaseResult)
         self.assertFalse(result.answer_valid)
         self.assertEqual(result.matched_doc_ids, ["doc_finance"])
+
+    def test_llamaindex_evaluation_runtime_label_reports_framework_only_when_evaluators_available(self) -> None:
+        engine = LlamaIndexEvaluationExecutionEngine()
+
+        with patch.object(engine, "_build_evaluator_bundle", return_value=None):
+            self.assertEqual(engine.resolve_runtime_label(), "native_fallback")
+
+        with patch.object(
+            engine,
+            "_build_evaluator_bundle",
+            return_value=_LlamaIndexEvaluatorBundle(
+                faithfulness_evaluator=_FakeEvaluator(True),
+                relevancy_evaluator=_FakeEvaluator(True),
+            ),
+        ):
+            self.assertEqual(engine.resolve_runtime_label(), "llamaindex")

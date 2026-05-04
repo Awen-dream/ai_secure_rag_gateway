@@ -27,6 +27,11 @@ class LlamaIndexEvaluationExecutionEngine(NativeEvaluationExecutionEngine):
 
     engine_name = "llamaindex"
 
+    def resolve_runtime_label(self) -> str:
+        """Return the effective evaluation runtime after evaluator resolution."""
+
+        return self.engine_name if self._build_evaluator_bundle() is not None else "native_fallback"
+
     def run_case(
         self,
         *,
